@@ -12,7 +12,7 @@ import logging
 from zoneinfo import ZoneInfo
 from urllib.parse import quote_plus
 from .const import (
-    APIKEY, TENANT, DEV_BROWSER, 
+    APIKEY, TENANT, DEV_BROWSER,
     DEV_MODEL, DEV_ID, PLATFORM,
     APPLIANCE_SENSOR_TYPES
 )
@@ -141,20 +141,20 @@ class BaxiHybridAppAPI:
             if not self.token:
                 _LOGGER.error("❌ Impossibile autenticarsi.")
                 return None
-                
+
         headers = {
             'x-semioty-tenant': TENANT,
             'authorization': f'Bearer {self.token}',
             'user-agent': DEV_BROWSER,
             'x-requested-with': 'it.baxi.HybridApp'
         }
-        
+
         try:
             response = requests.get(self.THINGS_URL, headers=headers, timeout=15)
             if response.ok:
                 data = response.json()
                 content = data.get("content", [])
-                
+
                 self.thingId = content[0].get("id") if content else None
                 self.thingModel = content[0].get("properties", {}).get("model") if content else None
                 self.thingSwVersion = content[0].get("properties", {}).get("versione_software_msc") if content else None
@@ -215,6 +215,16 @@ class BaxiHybridAppAPI:
             f"&pageSize=1"
             f"&metricName={quote_plus(metric_name)}"
         )
+
+    def _safe_get_data(self, data):
+        if not data or "data" not in data or not data["data"]:
+            return None
+        return data["data"][0]
+
+    def _convert_to_float(self, value_str):
+        if not value_str or str(value_str).strip() in ("---", "N/A", ""):
+            return None
+        return float(str(value_str).replace(",", "."))
 
     def fetch_temperature_ext(self):
         data = self._make_request(self._metric_url("Temperatura esterna"))
@@ -314,8 +324,17 @@ class BaxiHybridAppAPI:
             _LOGGER.info("🌡️ DHW storage temperature: %s °C at %s", self.dhw_storage_temp, self.dhw_storage_temp_timestamp)
         except (KeyError, IndexError, ValueError) as e:
             # Azzera il campo, warning + debug 'data'
-            self.dhw_storage_temp = None
-            self.dhw_storage_temp_timestamp = None    
+            item = self._safe_get_data(data)
+            if not item:
+                self.dhw_aux_storage_temp = None
+                self.dhw_aux_storage_temp_timestamp = None
+                return
+            value = self._convert_to_float(item["values"][0]["value"])
+            if value is None:
+                self.dhw_aux_storage_temp = None
+                self.dhw_aux_storage_temp_timestamp = None
+                return
+            self.dhw_aux_storage_temp = value
             _LOGGER.warning("⚠️ Parsing fallito (accumulo sanitario): %s — response 📦: %s", e, json.dumps(data)[:300])
             _LOGGER.debug("📦 Contenuto data (accumulo sanitario): %s", data)
 
@@ -471,7 +490,11 @@ class BaxiHybridAppAPI:
         if not data:
             return
         try:
-            item = data["data"][0]
+            item = self._safe_get_data(data)
+            if not item:
+                self.flame_status = None
+                self.flame_status_timestamp = None
+                return
             raw = str(item["values"][0]["value"]).strip().lower()
             mapping = {
                 "0": "Off", "1": "On",
@@ -572,8 +595,17 @@ class BaxiHybridAppAPI:
         if not data:
             return
         try:
-            item = data["data"][0]
-            self.power_pdc = float(item["values"][0]["value"])
+            item = self._safe_get_data(data)
+            if not item:
+                self.power_pdc = None
+                self.power_pdc_timestamp = None
+                return
+            value = self._convert_to_float(item["values"][0]["value"])
+            if value is None:
+                self.power_pdc = None
+                self.power_pdc_timestamp = None
+                return
+            self.power_pdc = value
             self.power_pdc_timestamp = item["timestamp"]
             _LOGGER.info("🌡️ Power PDC: %s", self.power_pdc)
         except (KeyError, IndexError, ValueError) as e:
@@ -647,7 +679,7 @@ class BaxiHybridAppAPI:
                         ts / 1000, tz=dt_util.DEFAULT_TIME_ZONE
                     ).date()
                     today_local_date = dt_util.now().date()
-                
+
                     # Se il campione non è di oggi, forza 0 finché non arriva il nuovo giorno
                     if sample_local_date != today_local_date:
                         val = 0.0
@@ -684,7 +716,7 @@ class BaxiHybridAppAPI:
             self.sanitary_scheduler_status = "error"
             _LOGGER.warning("⚠️ Parsing fallito (Schedulatore sanitario): %s — response 📦: %s", e, json.dumps(data)[:300])
             _LOGGER.debug("📦 Contenuto data (Schedulatore sanitario): %s", data)
-    
+
     def _compute_sanitary_schedule_state(self, raw_str, now_dt: datetime | None = None):
         """
         Converte lo scheduler in segmenti giornalieri e calcola:
@@ -865,4 +897,3 @@ class BaxiHybridAppAPI:
         except Exception as e:
             _LOGGER.exception("❌ Eccezione nella PUT parametro %s: %s", parameter_id, e)
             return False
-
