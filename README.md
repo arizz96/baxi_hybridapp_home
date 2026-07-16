@@ -98,6 +98,8 @@ A ready-made **blueprint** for push notifications is included — see [blueprint
 Mirrors the Baxi app's on/off flag, avoiding accidental sends. Both entities are **disabled by default** — enable them if you use holiday mode:
 - **Modo Vacanza Fine** — datetime entity for the end date/time. When holiday mode is **off**, setting it only *stages* the value locally (nothing is sent) — you apply it with the switch. When holiday mode is already **on**, changing it is sent immediately (extend/shorten the period).
 - **Modo Vacanza** — switch: turning it **on** sends the staged end date and activates holiday mode; turning it **off** disables it. Set the date first, then flip the switch.
+### 📅 Calendar Entity
+- **Schedulatore Sanitario** — editable calendar view of the DHW scheduler: each Comfort slot is a weekly-recurring event you can create/move/resize/delete directly from the HA Calendar card/dashboard; time outside the events stays/returns to Eco (up to 8 slots/day, 30-minute grid, 60-minute minimum, non-overlapping, same-day only)
 
 ### ❄️ Cooling Control
 - **Setpoint Raffrescamento** — adjustable cooling flow setpoint (7–30 °C, number entity, disabled by default); automatable via the native `number.set_value` service (e.g. lower it when you have photovoltaic surplus)
