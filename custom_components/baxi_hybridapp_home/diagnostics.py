@@ -124,6 +124,7 @@ async def async_get_config_entry_diagnostics(
                 "mode_now": api.sanitary_mode_now,
                 "next_change": api.sanitary_next_change,
                 "today_summary": api.sanitary_today_summary,
+                "raw": api.sanitary_scheduler_raw,
             },
             "alerts": {
                 "active_failure": api.active_failure_alert is not None,

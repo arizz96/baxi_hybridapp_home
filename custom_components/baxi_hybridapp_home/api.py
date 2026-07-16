@@ -16,6 +16,9 @@ from urllib.parse import quote_plus
 from .const import (
     APIKEY, TENANT, DEV_BROWSER,
     DEV_MODEL, DEV_ID, PLATFORM,
+    PARAM_ID_SANITARY_SCHEDULER, SANITARY_SCHEDULE_DAY_KEYS,
+    SANITARY_SCHEDULE_MAX_SLOTS_PER_DAY, SANITARY_SCHEDULE_GRID_MINUTES,
+    SANITARY_SCHEDULE_MIN_DURATION_MINUTES,
 )
 from .metrics import SIMPLE_METRICS, SimpleMetricSpec, ENERGY_SENSOR_TYPES
 
@@ -605,7 +608,115 @@ class BaxiHybridAppAPI:
 
         self.sanitary_today_summary = f"{self.sanitary_mode_now} fino alle {until_txt}"
 
+    # ---------------- Scrittura scheduler sanitario ----------------
+    def _validate_sanitary_slots(self, slots: list[dict]) -> list[tuple]:
+        """
+        Valida le fasce Comfort di un giorno e le ritorna come tuple (start, end)
+        ordinate per orario di inizio.
 
+        Vincoli device: max 8 fasce/giorno, griglia a 30 minuti, durata minima
+        60 minuti, nessuna sovrapposizione. Solleva ValueError (messaggio
+        esplicito) alla prima violazione.
+        """
+        if len(slots) > SANITARY_SCHEDULE_MAX_SLOTS_PER_DAY:
+            raise ValueError(
+                f"Troppe fasce ({len(slots)}): massimo {SANITARY_SCHEDULE_MAX_SLOTS_PER_DAY} al giorno"
+            )
+
+        def parse_grid_hhmm(s: str) -> time:
+            try:
+                hh, mm = s.split(":")
+                hh, mm = int(hh), int(mm)
+            except (ValueError, AttributeError, TypeError):
+                raise ValueError(f"Orario non valido: {s!r} (atteso 'HH:MM')") from None
+            if not (0 <= hh <= 23 and mm in (0, SANITARY_SCHEDULE_GRID_MINUTES)):
+                raise ValueError(
+                    f"Orario {s!r} non allineato alla griglia di {SANITARY_SCHEDULE_GRID_MINUTES} minuti"
+                )
+            return time(hh, mm)
+
+        ranges = []
+        for slot in slots:
+            start_t = parse_grid_hhmm(slot["start"])
+            end_t = parse_grid_hhmm(slot["end"])
+            start_min = start_t.hour * 60 + start_t.minute
+            end_min = end_t.hour * 60 + end_t.minute
+            if end_min <= start_min:
+                raise ValueError(f"Fascia non valida {slot['start']}-{slot['end']}: fine deve essere dopo inizio")
+            if end_min - start_min < SANITARY_SCHEDULE_MIN_DURATION_MINUTES:
+                raise ValueError(
+                    f"Fascia {slot['start']}-{slot['end']} troppo corta: minimo {SANITARY_SCHEDULE_MIN_DURATION_MINUTES} minuti"
+                )
+            ranges.append((start_t, end_t))
+
+        ranges.sort(key=lambda r: r[0])
+        for (prev_start, prev_end), (cur_start, cur_end) in zip(ranges, ranges[1:]):
+            if cur_start < prev_end:
+                raise ValueError(
+                    f"Fasce sovrapposte: {prev_start:%H:%M}-{prev_end:%H:%M} e {cur_start:%H:%M}-{cur_end:%H:%M}"
+                )
+        return ranges
+
+    def build_sanitary_schedule_payload(
+        self, day_key: str, slots: list[dict], eco_setpoint=None,
+    ) -> str:
+        """
+        Costruisce la stringa JSON completa dello scheduler sanitario (7 giorni)
+        partendo dall'ultimo raw noto (self.sanitary_scheduler_raw) e sostituendo
+        SOLO il giorno indicato con le nuove fasce Comfort.
+
+        Il device espone un unico parametro STRING per l'intera settimana:
+        scrivere un giorno richiede quindi ri-serializzare l'intero payload —
+        gli altri giorni restano quelli dell'ultimo fetch.
+        """
+        if day_key not in SANITARY_SCHEDULE_DAY_KEYS:
+            raise ValueError(f"Giorno non valido: {day_key!r} (attesi {SANITARY_SCHEDULE_DAY_KEYS})")
+
+        ranges = self._validate_sanitary_slots(slots)
+
+        base = {}
+        if self.sanitary_scheduler_raw:
+            try:
+                base = json.loads(self.sanitary_scheduler_raw)
+            except (ValueError, TypeError):
+                base = {}
+
+        # Preserva il setpoint eco esistente del giorno se non sovrascritto esplicitamente.
+        if eco_setpoint is None:
+            for it in base.get(day_key, []) or []:
+                if not it.get("start") and not it.get("end"):
+                    eco_setpoint = (it.get("params") or {}).get("Set-point sanitario eco")
+                    break
+        if eco_setpoint is None:
+            raise ValueError(
+                "Nessun setpoint eco disponibile per questo giorno: specificane uno esplicitamente"
+            )
+
+        day_entries = [
+            {"start": s.strftime("%H:%M"), "end": e.strftime("%H:%M"), "params": {}}
+            for (s, e) in ranges
+        ]
+        day_entries.append({
+            "start": None, "end": None,
+            "params": {"Set-point sanitario eco": str(eco_setpoint)},
+        })
+
+        for key in SANITARY_SCHEDULE_DAY_KEYS:
+            base.setdefault(key, [])
+        base[day_key] = day_entries
+
+        return json.dumps(base)
+
+    def set_sanitary_day_schedule(self, day_key: str, slots: list[dict], eco_setpoint=None) -> bool:
+        """
+        Rilegge lo scheduler dal cloud (per non sovrascrivere gli altri giorni
+        con dati stantii), sostituisce il giorno indicato e scrive via PUT
+        /data/configurationParameters sul parametro "Scheduler" (sanitario,
+        PARAM_ID_SANITARY_SCHEDULER — l'unico senza suffisso di zona).
+        """
+        self.fetch_sanitary_scheduler()
+        payload = self.build_sanitary_schedule_payload(day_key, slots, eco_setpoint)
+        return self.set_configuration_parameter(PARAM_ID_SANITARY_SCHEDULER, payload)
 
 
 
