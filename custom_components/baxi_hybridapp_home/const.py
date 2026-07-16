@@ -52,6 +52,22 @@ HOLIDAY_MODE_DISABLE_VALUE = "-1"
 # il datetime la memorizza qui senza inviare, lo switch la legge e la applica.
 HOLIDAY_STAGED_KEY = "holiday_mode_staged_end"
 
+# Scheduler sanitario (Schedulatore - Sanitario): unico parametro "Scheduler"
+# senza suffisso di zona nel catalogo configurationParameters (a differenza
+# di "Scheduler - Risc/Raff - ZonaN" per riscaldamento/raffrescamento).
+# Confermato via diagnostica: id immediatamente precedente al blocco
+# Risc/Raff Zona1 (5bec6325 → 5bec6326 → 5bec6327), stesso ordine della
+# metrica "Schedulatore - Sanitario" nel catalogo metriche.
+PARAM_ID_SANITARY_SCHEDULER = "5bec6325dbdf4f0008a6e047"
+
+# Chiavi giorno usate dallo scheduler sanitario Baxi (italiano, Lun=lunedì).
+SANITARY_SCHEDULE_DAY_KEYS = ["Lun", "Mar", "Mer", "Gio", "Ven", "Sab", "Dom"]
+
+# Vincoli lato device per le fasce Comfort dello scheduler sanitario.
+SANITARY_SCHEDULE_MAX_SLOTS_PER_DAY = 8
+SANITARY_SCHEDULE_GRID_MINUTES = 30
+SANITARY_SCHEDULE_MIN_DURATION_MINUTES = 60
+
 # Command IDs — Modo Impianto (PUT /data/commands?commandId=...&thingId=...)
 COMMAND_ID_MODE_STANDBY        = "5bec6335dbdf4f0008a6e059"
 COMMAND_ID_MODE_SOLO_SANITARIO = "5bec6335dbdf4f0008a6e05a"

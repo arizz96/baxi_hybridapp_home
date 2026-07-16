@@ -666,6 +666,7 @@ class SanitaryScheduleStateSensor(BaxiBaseSensor):
             "oggi_riepilogo": getattr(self._api, "sanitary_today_summary", None),
             "eco_setpoint": getattr(self._api, "sanitary_eco_setpoint", None),
             "scheduler_status": getattr(self._api, "sanitary_scheduler_status", None),
+            "scheduler_raw": getattr(self._api, "sanitary_scheduler_raw", None),
         }
 
 # 🚨 Contatori alert FAILURE (per dashboard).

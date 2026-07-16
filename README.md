@@ -92,6 +92,7 @@ A ready-made **blueprint** for push notifications is included — see [blueprint
 ### 🛁 Water Heater Entities
 - **Sanitario Comfort** — adjustable DHW comfort temperature setpoint (30–52 °C)
 - **Sanitario Eco** — adjustable DHW eco temperature setpoint (30–52 °C)
+- **`baxi_hybridapp_home.set_sanitary_schedule` service** — replaces the Comfort time slots for a single day of the DHW scheduler (up to 8 slots, 30-minute grid, 60-minute minimum, non-overlapping); the rest of the week is left untouched and time outside the given slots stays/returns to Eco
 
 ### 🏖️ Holiday Mode Control
 Mirrors the Baxi app's on/off flag, avoiding accidental sends. Both entities are **disabled by default** — enable them if you use holiday mode:
