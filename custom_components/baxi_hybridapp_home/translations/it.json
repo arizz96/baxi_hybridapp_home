@@ -133,6 +133,24 @@
           "description": "Valore desiderato per la temperatura eco (30–52 °C)."
         }
       }
+    },
+    "set_sanitary_schedule": {
+      "name": "Imposta Schedulatore Sanitario",
+      "description": "Sostituisce le fasce orarie Comfort di UN giorno dello scheduler sanitario (il resto della settimana non viene toccato). Max 8 fasce, allineate a 30 minuti, durata minima 60 minuti, non sovrapposte.",
+      "fields": {
+        "day": {
+          "name": "Giorno",
+          "description": "Giorno della settimana da aggiornare."
+        },
+        "slots": {
+          "name": "Fasce Comfort",
+          "description": "Elenco delle fasce Comfort del giorno, es. [{start: \"07:00\", end: \"09:00\"}]."
+        },
+        "eco_setpoint": {
+          "name": "Setpoint Eco",
+          "description": "Temperatura Eco (°C) fuori dalle fasce Comfort di questo giorno. Se omesso resta invariato."
+        }
+      }
     }
   }
 }
