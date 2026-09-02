@@ -79,7 +79,11 @@ class CapacityModel:
 
 CAPACITY_MODELS: tuple[CapacityModel, ...] = (
     CapacityModel(
-        aliases=("AWHP2R 8MR", "AWHP2R8MR", "AWHP2R"),
+        # "IDU CSI Alya E 8-10" è il thingModel Servitly osservato su un
+        # CSI IN Alya E 8kW reale (vedi diagnostica integrazione): stessa
+        # unità da 8 kW della Capacity Table AWHP2R 8MR, solo nome
+        # commerciale diverso da quello del foglio tecnico.
+        aliases=("AWHP2R 8MR", "AWHP2R8MR", "AWHP2R", "IDU CSI Alya E 8-10"),
         heating=_AWHP2R_8MR_MEDI,
     ),
     # Aggiungere qui gli altri modelli man mano che si ottengono le
