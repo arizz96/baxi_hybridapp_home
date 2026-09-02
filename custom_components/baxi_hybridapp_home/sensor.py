@@ -726,21 +726,20 @@ class FailureCount7dSensor(BaxiBaseSensor):
 # api._expected_capacity_point. Il target ("Set point mandata PDC caldo
 # (calcolato)") è calcolato dal firmware ed è già lo stesso valore sia in
 # produzione sanitaria che in riscaldamento a pavimento — nessuna logica
-# aggiuntiva qui per distinguere le due utenze. Se la metrica non è
-# pubblicata dal thingDefinition, si ripiega su pdc_exit_temp (lettura,
-# non target, ma comunque corretta in entrambi i casi).
+# aggiuntiva qui per distinguere le due utenze. Nessun fallback su letture
+# (pdc_exit_temp/boiler_flow_temp): se il thingDefinition non pubblica il
+# calcolato, questi sensori restano unavailable invece di stimare da un
+# valore che potrebbe essere residuo/non significativo a PDC ferma.
 # Unavailable finché il modello (thingModel) non è censito in capacity_tables.py.
 class _ExpectedCapacityMixin:
     """extra_state_attributes comune: quali letture hanno prodotto il valore."""
 
     @property
     def extra_state_attributes(self):
-        setpoint = getattr(self._api, "pdc_heating_setpoint_temp", None)
         return {
             "modello": getattr(self._api, "thingModel", None),
             "temp_esterna": getattr(self._api, "temp_ext", None),
-            "temp_mandata_pdc": setpoint if setpoint is not None else getattr(self._api, "pdc_exit_temp", None),
-            "temp_mandata_pdc_fonte": "setpoint calcolato" if setpoint is not None else "uscita pdc (fallback)",
+            "temp_mandata_pdc_setpoint": getattr(self._api, "pdc_heating_setpoint_temp", None),
             "fonte_dati": "Capacity Tables Baxi (EN 14511, valori medi)",
         }
 
