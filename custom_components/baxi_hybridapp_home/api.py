@@ -885,27 +885,39 @@ class BaxiHybridAppAPI:
             return False
 
     # 📊 Prestazioni attese (Capacity Tables Baxi, vedi capacity_tables.py)
-    # Stimano Pt/Pel/COP correnti interpolando temperatura esterna e
-    # temperatura di mandata sulla tabella "valori medi" del modello
-    # rilevato (thingModel/thingDefinitionName). None se il modello non è
-    # ancora censito o mancano le temperature.
+    # Stimano Pt/Pel/COP interpolando temperatura esterna e temperatura di
+    # mandata sulla tabella "valori medi" del modello rilevato
+    # (thingModel/thingDefinitionName). None se il modello non è ancora
+    # censito o mancano le temperature.
     #
-    # La "temperatura di mandata" della Capacity Table è misurata all'uscita
-    # della pompa di calore, non dopo le valvole deviatrici: usiamo quindi
-    # pdc_exit_temp (che segue davvero ciò che il compressore sta producendo)
-    # e non boiler_flow_temp, che è la mandata del circuito riscaldamento e
-    # resta "ferma" quando la PDC sta invece producendo sanitario (e viceversa
-    # non riflette il sanitario quando la PDC scalda il circuito impianto).
-    # pdc_exit_temp è corretta in entrambi i casi: la PDC serve sia il
-    # sanitario che il riscaldamento a pavimento, e in ogni istante lavora
-    # per una sola delle due richieste.
+    # La "temperatura di mandata" della Capacity Table è il TARGET che la PDC
+    # sta cercando di produrre, non una lettura istantanea: usiamo quindi
+    # pdc_heating_setpoint_temp ("Set point mandata PDC caldo (calcolato)"),
+    # il target che il firmware stesso calcola per la PDC in modo caldo —
+    # "caldo" qui è l'opposto di "freddo" (raffrescamento), non "sanitario"
+    # opposto a "riscaldamento": il valore è già lo stesso sia che la PDC
+    # stia producendo sanitario sia che stia scaldando il circuito a
+    # pavimento, perché il firmware unifica da solo quale delle due
+    # richieste sta servendo in questo momento (nessuna logica aggiuntiva
+    # necessaria qui per distinguerle).
+    # boiler_flow_temp (mandata del solo circuito riscaldamento, letta non
+    # calcolata) resterebbe "ferma" mentre la PDC produce sanitario, quindi
+    # non va bene. Se il modello/firmware non pubblica il calcolato
+    # (metrica assente su alcuni thingDefinition), ripieghiamo su
+    # pdc_exit_temp: una lettura, non un target, ma comunque corretta in
+    # entrambi i casi perché misurata prima delle valvole deviatrici.
     def _expected_capacity_point(self):
-        if self.temp_ext is None or self.pdc_exit_temp is None:
+        if self.temp_ext is None:
+            return None
+        flow_temp = self.pdc_heating_setpoint_temp
+        if flow_temp is None:
+            flow_temp = self.pdc_exit_temp
+        if flow_temp is None:
             return None
         model = find_capacity_model(self.thingModel, self.thingDefinitionName)
         if model is None:
             return None
-        return interpolate(model.heating, self.temp_ext, self.pdc_exit_temp)
+        return interpolate(model.heating, self.temp_ext, flow_temp)
 
     @property
     def expected_thermal_power(self):
