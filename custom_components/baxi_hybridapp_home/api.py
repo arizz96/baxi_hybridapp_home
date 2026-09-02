@@ -900,24 +900,18 @@ class BaxiHybridAppAPI:
     # pavimento, perché il firmware unifica da solo quale delle due
     # richieste sta servendo in questo momento (nessuna logica aggiuntiva
     # necessaria qui per distinguerle).
-    # boiler_flow_temp (mandata del solo circuito riscaldamento, letta non
-    # calcolata) resterebbe "ferma" mentre la PDC produce sanitario, quindi
-    # non va bene. Se il modello/firmware non pubblica il calcolato
-    # (metrica assente su alcuni thingDefinition), ripieghiamo su
-    # pdc_exit_temp: una lettura, non un target, ma comunque corretta in
-    # entrambi i casi perché misurata prima delle valvole deviatrici.
+    # Niente fallback su pdc_exit_temp: è una lettura, non un target, e può
+    # restare "in eredità" a un valore residuo quando la PDC è ferma (stesso
+    # problema che aveva boiler_flow_temp) — meglio unavailable che un
+    # numero plausibile ma non significativo. Se il modello/firmware non
+    # pubblica il calcolato, i tre sensori restano semplicemente unavailable.
     def _expected_capacity_point(self):
-        if self.temp_ext is None:
-            return None
-        flow_temp = self.pdc_heating_setpoint_temp
-        if flow_temp is None:
-            flow_temp = self.pdc_exit_temp
-        if flow_temp is None:
+        if self.temp_ext is None or self.pdc_heating_setpoint_temp is None:
             return None
         model = find_capacity_model(self.thingModel, self.thingDefinitionName)
         if model is None:
             return None
-        return interpolate(model.heating, self.temp_ext, flow_temp)
+        return interpolate(model.heating, self.temp_ext, self.pdc_heating_setpoint_temp)
 
     @property
     def expected_thermal_power(self):
