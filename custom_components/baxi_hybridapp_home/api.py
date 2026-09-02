@@ -889,13 +889,23 @@ class BaxiHybridAppAPI:
     # temperatura di mandata sulla tabella "valori medi" del modello
     # rilevato (thingModel/thingDefinitionName). None se il modello non è
     # ancora censito o mancano le temperature.
+    #
+    # La "temperatura di mandata" della Capacity Table è misurata all'uscita
+    # della pompa di calore, non dopo le valvole deviatrici: usiamo quindi
+    # pdc_exit_temp (che segue davvero ciò che il compressore sta producendo)
+    # e non boiler_flow_temp, che è la mandata del circuito riscaldamento e
+    # resta "ferma" quando la PDC sta invece producendo sanitario (e viceversa
+    # non riflette il sanitario quando la PDC scalda il circuito impianto).
+    # pdc_exit_temp è corretta in entrambi i casi: la PDC serve sia il
+    # sanitario che il riscaldamento a pavimento, e in ogni istante lavora
+    # per una sola delle due richieste.
     def _expected_capacity_point(self):
-        if self.temp_ext is None or self.boiler_flow_temp is None:
+        if self.temp_ext is None or self.pdc_exit_temp is None:
             return None
         model = find_capacity_model(self.thingModel, self.thingDefinitionName)
         if model is None:
             return None
-        return interpolate(model.heating, self.temp_ext, self.boiler_flow_temp)
+        return interpolate(model.heating, self.temp_ext, self.pdc_exit_temp)
 
     @property
     def expected_thermal_power(self):
