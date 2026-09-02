@@ -5,7 +5,7 @@ custom_components/baxi_hybridapp_home/sensor.py
 """
 
 from homeassistant.components.sensor import SensorEntity, SensorDeviceClass, SensorStateClass
-from homeassistant.const import UnitOfTemperature, UnitOfPressure, PERCENTAGE
+from homeassistant.const import UnitOfTemperature, UnitOfPressure, UnitOfPower, PERCENTAGE
 from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from homeassistant.util import dt as dt_util
@@ -703,6 +703,76 @@ class FailureCount7dSensor(BaxiBaseSensor):
         )
 
 
+# 📊 Prestazioni attese (Capacity Tables Baxi): COP, Pt, Pel interpolati da
+# temperatura esterna + temperatura di mandata, vedi api._expected_capacity_point.
+# Unavailable finché il modello (thingModel) non è censito in capacity_tables.py.
+class ExpectedCOPSensor(BaxiBaseSensor):
+    def __init__(self, coordinator, api):
+        super().__init__(
+            coordinator,
+            api,
+            name="COP Atteso",
+            unique_id="baxi_expected_cop",
+            value_key="expected_cop",
+            unit=None,
+            device_class=None,
+            icon="mdi:sync-circle",
+        )
+        self._attr_suggested_display_precision = 2
+
+    @property
+    def native_value(self):
+        val = getattr(self._api, self._value_key, None)
+        return round(val, 2) if val is not None else None
+
+    @property
+    def extra_state_attributes(self):
+        return {
+            "modello": getattr(self._api, "thingModel", None),
+            "fonte_dati": "Capacity Tables Baxi (EN 14511, valori medi)",
+        }
+
+
+class ExpectedThermalPowerSensor(BaxiBaseSensor):
+    def __init__(self, coordinator, api):
+        super().__init__(
+            coordinator,
+            api,
+            name="Potenza Termica Attesa (Pt)",
+            unique_id="baxi_expected_thermal_power",
+            value_key="expected_thermal_power",
+            unit=UnitOfPower.KILO_WATT,
+            device_class=SensorDeviceClass.POWER,
+            icon="mdi:radiator",
+        )
+        self._attr_suggested_display_precision = 2
+
+    @property
+    def native_value(self):
+        val = getattr(self._api, self._value_key, None)
+        return round(val, 2) if val is not None else None
+
+
+class ExpectedElectricPowerSensor(BaxiBaseSensor):
+    def __init__(self, coordinator, api):
+        super().__init__(
+            coordinator,
+            api,
+            name="Potenza Elettrica Attesa (Pel)",
+            unique_id="baxi_expected_electric_power",
+            value_key="expected_electric_power",
+            unit=UnitOfPower.KILO_WATT,
+            device_class=SensorDeviceClass.POWER,
+            icon="mdi:flash",
+        )
+        self._attr_suggested_display_precision = 2
+
+    @property
+    def native_value(self):
+        val = getattr(self._api, self._value_key, None)
+        return round(val, 2) if val is not None else None
+
+
 # 🔒 Classe sensori energia
 class BaxiEnergySensor(BaxiBaseSensor):
     def __init__(self, coordinator, api, description):
@@ -781,6 +851,10 @@ async def async_setup_entry(hass, entry, async_add_entities):
         # contatori alert per dashboard
         FailureCount24hSensor(coordinator, api),
         FailureCount7dSensor(coordinator, api),
+        # prestazioni attese da Capacity Tables Baxi
+        ExpectedCOPSensor(coordinator, api),
+        ExpectedThermalPowerSensor(coordinator, api),
+        ExpectedElectricPowerSensor(coordinator, api),
     ]
     # affianco i nuovi sensori energia
     sensors.extend(
