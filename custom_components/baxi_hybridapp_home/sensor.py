@@ -704,9 +704,26 @@ class FailureCount7dSensor(BaxiBaseSensor):
 
 
 # 📊 Prestazioni attese (Capacity Tables Baxi): COP, Pt, Pel interpolati da
-# temperatura esterna + temperatura di mandata, vedi api._expected_capacity_point.
+# temperatura esterna + temperatura uscita PDC, vedi api._expected_capacity_point.
+# La temperatura uscita PDC (non la mandata del circuito riscaldamento) è
+# corretta sia quando la PDC scalda il sanitario sia quando scalda il
+# pavimento: è misurata al bocchettone della pompa di calore, prima delle
+# valvole deviatrici che smistano fra le due utenze.
 # Unavailable finché il modello (thingModel) non è censito in capacity_tables.py.
-class ExpectedCOPSensor(BaxiBaseSensor):
+class _ExpectedCapacityMixin:
+    """extra_state_attributes comune: quali letture hanno prodotto il valore."""
+
+    @property
+    def extra_state_attributes(self):
+        return {
+            "modello": getattr(self._api, "thingModel", None),
+            "temp_esterna": getattr(self._api, "temp_ext", None),
+            "temp_uscita_pdc": getattr(self._api, "pdc_exit_temp", None),
+            "fonte_dati": "Capacity Tables Baxi (EN 14511, valori medi)",
+        }
+
+
+class ExpectedCOPSensor(_ExpectedCapacityMixin, BaxiBaseSensor):
     def __init__(self, coordinator, api):
         super().__init__(
             coordinator,
@@ -725,15 +742,8 @@ class ExpectedCOPSensor(BaxiBaseSensor):
         val = getattr(self._api, self._value_key, None)
         return round(val, 2) if val is not None else None
 
-    @property
-    def extra_state_attributes(self):
-        return {
-            "modello": getattr(self._api, "thingModel", None),
-            "fonte_dati": "Capacity Tables Baxi (EN 14511, valori medi)",
-        }
 
-
-class ExpectedThermalPowerSensor(BaxiBaseSensor):
+class ExpectedThermalPowerSensor(_ExpectedCapacityMixin, BaxiBaseSensor):
     def __init__(self, coordinator, api):
         super().__init__(
             coordinator,
@@ -753,7 +763,7 @@ class ExpectedThermalPowerSensor(BaxiBaseSensor):
         return round(val, 2) if val is not None else None
 
 
-class ExpectedElectricPowerSensor(BaxiBaseSensor):
+class ExpectedElectricPowerSensor(_ExpectedCapacityMixin, BaxiBaseSensor):
     def __init__(self, coordinator, api):
         super().__init__(
             coordinator,
