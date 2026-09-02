@@ -18,6 +18,7 @@ from .const import (
     DEV_MODEL, DEV_ID, PLATFORM,
 )
 from .metrics import SIMPLE_METRICS, SimpleMetricSpec, ENERGY_SENSOR_TYPES
+from .capacity_tables import find_capacity_model, interpolate
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -882,4 +883,32 @@ class BaxiHybridAppAPI:
         except Exception as e:
             _LOGGER.exception("❌ Eccezione nella PUT parametro %s: %s", parameter_id, e)
             return False
+
+    # 📊 Prestazioni attese (Capacity Tables Baxi, vedi capacity_tables.py)
+    # Stimano Pt/Pel/COP correnti interpolando temperatura esterna e
+    # temperatura di mandata sulla tabella "valori medi" del modello
+    # rilevato (thingModel/thingDefinitionName). None se il modello non è
+    # ancora censito o mancano le temperature.
+    def _expected_capacity_point(self):
+        if self.temp_ext is None or self.boiler_flow_temp is None:
+            return None
+        model = find_capacity_model(self.thingModel, self.thingDefinitionName)
+        if model is None:
+            return None
+        return interpolate(model.heating, self.temp_ext, self.boiler_flow_temp)
+
+    @property
+    def expected_thermal_power(self):
+        point = self._expected_capacity_point()
+        return point.pt if point else None
+
+    @property
+    def expected_electric_power(self):
+        point = self._expected_capacity_point()
+        return point.pel if point else None
+
+    @property
+    def expected_cop(self):
+        point = self._expected_capacity_point()
+        return point.cop if point else None
 

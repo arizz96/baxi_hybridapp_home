@@ -45,6 +45,11 @@ This extension is only compatible with devices:
 ### ⚡ Power Sensors
 - **Boiler Instantaneous Power** — current boiler power output
 - **PDC Instantaneous Power** — current heat pump power output
+- **COP Atteso** — expected heat pump COP, interpolated from the manufacturer's Capacity Tables using current external and flow temperature
+- **Potenza Termica Attesa (Pt)** — expected thermal power output (kW), same interpolation
+- **Potenza Elettrica Attesa (Pel)** — expected electric power draw (kW), same interpolation
+
+The three "attesa/expected" sensors are computed, not read from the cloud: they look up the manufacturer's published Capacity Tables (EN 14511, "valori medi") for your detected device model and interpolate on external/flow temperature. Currently only the **AWHP2R 8MR** model is catalogued (see [`capacity_tables.py`](custom_components/baxi_hybridapp_home/capacity_tables.py)); on any other model these sensors stay `unavailable`. More models can be added over time by contributing their Capacity Tables PDF.
 
 ### 🧭 Mode / Status Sensors
 - **System Mode** — current operating mode (Automatico, Standby, Solo Sanitario)
