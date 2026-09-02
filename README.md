@@ -34,6 +34,7 @@ This extension is only compatible with devices:
 - **DHW Auxiliary Storage Temperature** — auxiliary tank temperature
 - **PDC Exit Temperature** — heat pump outlet temperature
 - **PDC Return Temperature** — heat pump return temperature
+- **Setpoint Mandata PDC (Calcolato)** — firmware-calculated target flow temperature for the heat pump in heating mode (same value whether it's currently producing DHW or heating the floor loop)
 - **Sanitary Setpoint Instantaneous** — current target DHW temperature
 - **Sanitary Setpoint Comfort** — comfort mode setpoint
 - **Sanitary Setpoint Eco** — eco mode setpoint
@@ -45,11 +46,11 @@ This extension is only compatible with devices:
 ### ⚡ Power Sensors
 - **Boiler Instantaneous Power** — current boiler power output
 - **PDC Instantaneous Power** — current heat pump power output
-- **COP Atteso** — expected heat pump COP, interpolated from the manufacturer's Capacity Tables using current external temperature and PDC exit temperature
+- **COP Atteso** — expected heat pump COP, interpolated from the manufacturer's Capacity Tables using current external temperature and the PDC's target flow temperature
 - **Potenza Termica Attesa (Pt)** — expected thermal power output (kW), same interpolation
 - **Potenza Elettrica Attesa (Pel)** — expected electric power draw (kW), same interpolation
 
-The three "attesa/expected" sensors are computed, not read from the cloud: they look up the manufacturer's published Capacity Tables (EN 14511, "valori medi") for your detected device model and interpolate on external temperature × PDC exit temperature (`pdc_exit_temp`, not the heating-circuit flow temperature). The heat pump serves both the DHW tank and the floor heating circuit, one at a time, through a diverter valve — `pdc_exit_temp` is measured at the unit's own outlet, before that valve, so it reflects the real operating point regardless of which of the two it's currently serving; the heating-circuit flow sensor alone would read "idle" while the unit is actually heating DHW (or vice versa). Currently only the **AWHP2R 8MR** model is catalogued (see [`capacity_tables.py`](custom_components/baxi_hybridapp_home/capacity_tables.py)); on any other model these sensors stay `unavailable`. More models can be added over time by contributing their Capacity Tables PDF.
+The three "attesa/expected" sensors are computed, not read from the cloud: they look up the manufacturer's published Capacity Tables (EN 14511, "valori medi") for your detected device model and interpolate on external temperature × flow temperature. The flow-temperature input is `pdc_heating_setpoint_temp` ("Set point mandata PDC caldo (calcolato)") — the *target* flow temperature the firmware itself calculates for the heat pump in heating mode ("caldo" vs. "freddo"/cooling, not DHW vs. floor heating). The heat pump serves both the DHW tank and the floor heating circuit, one at a time, through a diverter valve, and this calculated setpoint is already the same value regardless of which of the two it's currently serving — no extra logic needed here to tell them apart. If a device model doesn't publish that metric, the sensors fall back to `pdc_exit_temp` (a reading, not a target, but still measured before the diverter valve so it's correct either way); the plain heating-circuit flow sensor (`boiler_flow_temp`) is never used here, since it reads "idle" while the unit is actually producing DHW (or vice versa). Currently only the **AWHP2R 8MR** model is catalogued (see [`capacity_tables.py`](custom_components/baxi_hybridapp_home/capacity_tables.py)); on any other model these sensors stay `unavailable`. More models can be added over time by contributing their Capacity Tables PDF.
 
 ### 🧭 Mode / Status Sensors
 - **System Mode** — current operating mode (Automatico, Standby, Solo Sanitario)

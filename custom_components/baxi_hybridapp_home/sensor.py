@@ -142,6 +142,24 @@ class PDCReturnTempSensor(BaxiBaseSensor):
             icon="mdi:thermometer"
         )
 
+class PDCHeatingSetpointTempSensor(BaxiBaseSensor):
+    # Target di mandata calcolato dal firmware per la PDC in modo caldo:
+    # stesso valore sia in produzione sanitaria che in riscaldamento a
+    # pavimento (il firmware unifica da solo la richiesta attiva). Usato
+    # come input per i sensori "attesi" (COP/Pt/Pel), vedi
+    # api._expected_capacity_point.
+    def __init__(self, coordinator, api):
+        super().__init__(
+            coordinator,
+            api,
+            name="Setpoint Mandata PDC (Calcolato)",
+            unique_id="baxi_pdc_heating_setpoint_temperature",
+            value_key="pdc_heating_setpoint_temp",
+            unit=UnitOfTemperature.CELSIUS,
+            device_class=SensorDeviceClass.TEMPERATURE,
+            icon="mdi:target"
+        )
+
 class SetpointInstantTempSensor(BaxiBaseSensor):
     def __init__(self, coordinator, api):
         super().__init__(
@@ -704,21 +722,25 @@ class FailureCount7dSensor(BaxiBaseSensor):
 
 
 # 📊 Prestazioni attese (Capacity Tables Baxi): COP, Pt, Pel interpolati da
-# temperatura esterna + temperatura uscita PDC, vedi api._expected_capacity_point.
-# La temperatura uscita PDC (non la mandata del circuito riscaldamento) è
-# corretta sia quando la PDC scalda il sanitario sia quando scalda il
-# pavimento: è misurata al bocchettone della pompa di calore, prima delle
-# valvole deviatrici che smistano fra le due utenze.
+# temperatura esterna + target di mandata PDC, vedi
+# api._expected_capacity_point. Il target ("Set point mandata PDC caldo
+# (calcolato)") è calcolato dal firmware ed è già lo stesso valore sia in
+# produzione sanitaria che in riscaldamento a pavimento — nessuna logica
+# aggiuntiva qui per distinguere le due utenze. Se la metrica non è
+# pubblicata dal thingDefinition, si ripiega su pdc_exit_temp (lettura,
+# non target, ma comunque corretta in entrambi i casi).
 # Unavailable finché il modello (thingModel) non è censito in capacity_tables.py.
 class _ExpectedCapacityMixin:
     """extra_state_attributes comune: quali letture hanno prodotto il valore."""
 
     @property
     def extra_state_attributes(self):
+        setpoint = getattr(self._api, "pdc_heating_setpoint_temp", None)
         return {
             "modello": getattr(self._api, "thingModel", None),
             "temp_esterna": getattr(self._api, "temp_ext", None),
-            "temp_uscita_pdc": getattr(self._api, "pdc_exit_temp", None),
+            "temp_mandata_pdc": setpoint if setpoint is not None else getattr(self._api, "pdc_exit_temp", None),
+            "temp_mandata_pdc_fonte": "setpoint calcolato" if setpoint is not None else "uscita pdc (fallback)",
             "fonte_dati": "Capacity Tables Baxi (EN 14511, valori medi)",
         }
 
@@ -842,6 +864,7 @@ async def async_setup_entry(hass, entry, async_add_entities):
         DHWAuxStorageTempSensor(coordinator, api),
         PDCExitTempSensor(coordinator, api),
         PDCReturnTempSensor(coordinator, api),
+        PDCHeatingSetpointTempSensor(coordinator, api),
         SetpointInstantTempSensor(coordinator, api),
         SetpointComfortTempSensor(coordinator, api),
         SetpointEcoTempSensor(coordinator, api),
