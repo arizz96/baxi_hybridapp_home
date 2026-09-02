@@ -18,7 +18,7 @@ from .const import (
     DEV_MODEL, DEV_ID, PLATFORM,
 )
 from .metrics import SIMPLE_METRICS, SimpleMetricSpec, ENERGY_SENSOR_TYPES
-from .capacity_tables import find_capacity_model, interpolate
+from .capacity_tables import find_capacity_model, interpolate, min_flow_temp
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -905,11 +905,23 @@ class BaxiHybridAppAPI:
     # problema che aveva boiler_flow_temp) — meglio unavailable che un
     # numero plausibile ma non significativo. Se il modello/firmware non
     # pubblica il calcolato, i tre sensori restano semplicemente unavailable.
+    #
+    # A PDC ferma (idle, nessuna richiesta attiva né sanitario né
+    # riscaldamento) il "calcolato" può riportare un placeholder ben sotto
+    # le mandate reali di riscaldamento (osservato: 10°C con 30°C esterni,
+    # PDC idle) invece del target dell'ultima/prossima richiesta. La
+    # Capacity Table parte comunque da min_flow_temp (25°C): sotto quel
+    # limite il produttore non pubblica dati, quindi non è comunque
+    # interpolabile in modo affidabile — trattiamo un valore inferiore come
+    # "nessuna richiesta di calore in corso" invece di clampare al bordo
+    # della tabella e mostrare un numero plausibile ma senza significato.
     def _expected_capacity_point(self):
         if self.temp_ext is None or self.pdc_heating_setpoint_temp is None:
             return None
         model = find_capacity_model(self.thingModel, self.thingDefinitionName)
         if model is None:
+            return None
+        if self.pdc_heating_setpoint_temp < min_flow_temp(model.heating):
             return None
         return interpolate(model.heating, self.temp_ext, self.pdc_heating_setpoint_temp)
 
