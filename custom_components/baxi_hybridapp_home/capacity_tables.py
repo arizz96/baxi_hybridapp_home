@@ -91,6 +91,18 @@ CAPACITY_MODELS: tuple[CapacityModel, ...] = (
 )
 
 
+def min_flow_temp(table: CapacityTable) -> float:
+    """Il più basso valore di temperatura di mandata pubblicato nella tabella.
+
+    Sotto questo limite il produttore non fornisce dati: un valore di
+    mandata inferiore non è una richiesta di riscaldamento plausibile (es.
+    "Set point mandata PDC caldo" può riportare un placeholder/floor a PDC
+    ferma, molto sotto le mandate reali a cui si scalda acqua), quindi va
+    trattato come "nessuna richiesta attiva" invece che interpolato.
+    """
+    return min(flow for cols in table.values() for flow in cols)
+
+
 def _normalize(value: str | None) -> str:
     return "".join(str(value or "").upper().split())
 
