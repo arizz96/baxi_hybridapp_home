@@ -104,6 +104,7 @@ Mirrors the Baxi app's on/off flag, avoiding accidental sends. Both entities are
 ### 🔘 Diagnostic Entities
 - **Aggiorna** — button to manually trigger a data refresh
 - **Test Failure** — button to simulate a FAILURE alert (only available with debug logging enabled)
+- **Dump Tutte le Metriche** — downloads the current value of *every* metric available in your device's cloud catalog (not just the ones this integration reads) and logs one line per metric at DEBUG level, so you can inspect exactly what the Baxi API publishes for your device (only available with debug logging enabled; triggers ~250 sequential HTTP requests, so use it on demand rather than routinely)
 
 ### 🩺 Diagnostics
 From the integration page (**⋮** > **Download diagnostics**) you can download a JSON report with the current sensor values and the full catalog of commands, configuration parameters and metrics supported by your device model. Credentials and serial number are redacted. Attach it when opening an issue — it makes troubleshooting much faster, especially for device models not yet fully supported.
