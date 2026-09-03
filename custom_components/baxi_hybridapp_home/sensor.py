@@ -732,8 +732,10 @@ class FailureCount7dSensor(BaxiBaseSensor):
 # valore che potrebbe essere residuo/non significativo a PDC ferma.
 # A PDC idle il calcolato può riportare un placeholder ben sotto le
 # mandate reali (osservato: 10°C con 30°C esterni, nessuna richiesta
-# attiva): api._expected_capacity_point scarta i valori sotto
-# min_flow_temp() della tabella del modello, sensori unavailable in quel caso.
+# attiva): api._expected_capacity_point richiede power_pdc > 0 quando
+# disponibile, e in fallback scarta comunque i valori sotto
+# min_flow_temp() della tabella del modello — sensori unavailable in
+# entrambi i casi.
 # Unavailable finché il modello (thingModel) non è censito in capacity_tables.py.
 class _ExpectedCapacityMixin:
     """extra_state_attributes comune: quali letture hanno prodotto il valore."""
