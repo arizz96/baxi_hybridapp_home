@@ -130,6 +130,35 @@ class BaxiTestFailureButton(ButtonEntity):
         return build_device_info(self._api)
 
 
+class BaxiDumpAllMetricsButton(ButtonEntity):
+    """
+    Pulsante diagnostico che scarica il valore corrente di TUTTE le metriche
+    del catalogo cloud del modello (non solo quelle lette dall'integrazione)
+    e le logga a livello DEBUG (una riga per metrica, con timestamp).
+
+    Utile per ispezionare cosa pubblica realmente l'API Servitly per il
+    proprio device. Sono ~250 richieste HTTP sequenziali: va premuto on-demand,
+    non fa parte del polling automatico.
+    """
+
+    _attr_name = "Dump Tutte le Metriche"
+    _attr_unique_id = "baxi_dump_all_metrics_button"
+    _attr_icon = "mdi:database-search"
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+
+    def __init__(self, coordinator, api):
+        self._coordinator = coordinator
+        self._api = api
+
+    async def async_press(self):
+        _LOGGER.info("🔍 Pulsante 'Dump Tutte le Metriche' premuto, avvio scaricamento...")
+        await self.hass.async_add_executor_job(self._api.fetch_all_metrics_debug)
+
+    @property
+    def device_info(self):
+        return build_device_info(self._api)
+
+
 async def async_setup_entry(hass, entry, async_add_entities):
     """Configura le entità pulsante.
 
@@ -150,6 +179,7 @@ async def async_setup_entry(hass, entry, async_add_entities):
     buttons = [BaxiUpdateButton(coordinator, api)]
     if _LOGGER.isEnabledFor(logging.DEBUG):
         buttons.append(BaxiTestFailureButton(coordinator, api))
-        _LOGGER.debug("🧪 DEBUG attivo: esposto pulsante Test Failure")
+        buttons.append(BaxiDumpAllMetricsButton(coordinator, api))
+        _LOGGER.debug("🧪 DEBUG attivo: esposti pulsanti Test Failure e Dump Tutte le Metriche")
 
     async_add_entities(buttons, True)

@@ -465,6 +465,45 @@ class BaxiHybridAppAPI:
                 )
 
 
+    def fetch_all_metrics_debug(self) -> dict[str, dict]:
+        """
+        Scarica il valore corrente di OGNI metrica del catalogo cloud del modello
+        (thingDefinition), non solo quelle lette dall'integrazione, e le logga
+        a livello DEBUG. Serve per ispezionare cosa pubblica realmente l'API
+        Servitly per il proprio device, comprese le metriche non ancora
+        mappate in SIMPLE_METRICS/ENERGY_SENSOR_TYPES.
+
+        Sono N richieste HTTP sequenziali (una per ogni nome metrica del
+        catalogo, tipicamente ~250) quindi va invocato on-demand (bottone
+        diagnostico), MAI ad ogni ciclo di polling.
+        """
+        caps = self.fetch_capabilities()
+        names = [m.get("name") for m in caps.get("metrics") or [] if m.get("name")]
+        if not names:
+            _LOGGER.warning("🔍 Dump metriche: catalogo vuoto (thingDefinitionId mancante?)")
+            return {}
+
+        _LOGGER.info("🔍 Dump di tutte le metriche cloud (%d totali)...", len(names))
+        result: dict[str, dict] = {}
+        for name in names:
+            data = self._make_request(self._metric_url(name))
+            items = (data or {}).get("data") or []
+            if not items:
+                _LOGGER.debug("🔍   %s = (nessun dato)", name)
+                result[name] = {"value": None, "timestamp": None}
+                continue
+            try:
+                item = items[0]
+                raw = item["values"][0]["value"]
+                ts = item.get("timestamp")
+                _LOGGER.debug("🔍   %s = %s (ts=%s)", name, raw, ts)
+                result[name] = {"value": raw, "timestamp": ts}
+            except (KeyError, IndexError, TypeError) as e:
+                _LOGGER.debug("🔍   %s = <parsing fallito: %s>", name, e)
+                result[name] = {"value": None, "timestamp": None}
+        _LOGGER.info("🔍 Dump metriche completato (%d metriche lette).", len(result))
+        return result
+
     def fetch_sanitary_scheduler(self):
         data = self._make_request(self._metric_url("Schedulatore - Sanitario"))
         if not data:
