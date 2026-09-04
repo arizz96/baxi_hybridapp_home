@@ -31,7 +31,13 @@ from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from homeassistant.util import dt as dt_util
 
-from .const import DATA_KEY_API, DOMAIN, SANITARY_SCHEDULE_DAY_KEYS
+from .const import (
+    DATA_KEY_API,
+    DOMAIN,
+    SANITARY_SCHEDULE_DAY_KEYS,
+    SANITARY_SCHEDULE_GRID_MINUTES,
+    SANITARY_SCHEDULE_MIN_DURATION_MINUTES,
+)
 from .device import build_device_info
 
 _LOGGER = logging.getLogger(__name__)
@@ -146,6 +152,35 @@ class BaxiSanitaryScheduleCalendar(CoordinatorEntity, CalendarEntity):
             raise HomeAssistantError("Scrittura dello scheduler sanitario fallita")
         await self._after_write()
 
+    @staticmethod
+    def _snap_to_grid(start: datetime, end: datetime) -> tuple[datetime, datetime]:
+        """
+        Allinea inizio/fine alla griglia di SANITARY_SCHEDULE_GRID_MINUTES minuti
+        richiesta dal device e garantisce la durata minima
+        SANITARY_SCHEDULE_MIN_DURATION_MINUTES.
+
+        Il dialog "modifica evento" di HA permette di scegliere un orario
+        libero (qualsiasi minuto): senza questo arrotondamento, quasi ogni
+        modifica fatta a mano verrebbe rifiutata da _validate_sanitary_slots
+        per un disallineamento di pochi minuti, dando l'impressione che
+        l'evento non sia modificabile.
+        """
+        grid = SANITARY_SCHEDULE_GRID_MINUTES
+        start = start.replace(second=0, microsecond=0)
+        end = end.replace(second=0, microsecond=0)
+
+        start_minutes = round((start.hour * 60 + start.minute) / grid) * grid
+        end_minutes = round((end.hour * 60 + end.minute) / grid) * grid
+        start_minutes = min(start_minutes, 24 * 60 - grid)
+        end_minutes = min(end_minutes, 24 * 60 - grid)
+
+        start = start.replace(hour=start_minutes // 60, minute=start_minutes % 60)
+        end = end.replace(hour=end_minutes // 60, minute=end_minutes % 60)
+
+        if (end - start).total_seconds() / 60 < SANITARY_SCHEDULE_MIN_DURATION_MINUTES:
+            end = start + timedelta(minutes=SANITARY_SCHEDULE_MIN_DURATION_MINUTES)
+        return start, end
+
     async def _write_event(
         self, start: datetime, end: datetime, replace_uid: str | None = None,
     ) -> None:
@@ -157,6 +192,8 @@ class BaxiSanitaryScheduleCalendar(CoordinatorEntity, CalendarEntity):
             raise HomeAssistantError(
                 "Le fasce Comfort non possono superare la mezzanotte: usa un solo giorno per evento"
             )
+
+        start, end = self._snap_to_grid(start, end)
 
         day_key = SANITARY_SCHEDULE_DAY_KEYS[start.weekday()]
         slot = {"start": start.strftime("%H:%M"), "end": end.strftime("%H:%M")}
