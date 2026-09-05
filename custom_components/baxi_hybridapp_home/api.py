@@ -18,6 +18,7 @@ from .const import (
     DEV_MODEL, DEV_ID, PLATFORM,
 )
 from .metrics import SIMPLE_METRICS, SimpleMetricSpec, ENERGY_SENSOR_TYPES
+from .capacity_tables import find_capacity_model, interpolate, min_flow_temp
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -882,4 +883,73 @@ class BaxiHybridAppAPI:
         except Exception as e:
             _LOGGER.exception("❌ Eccezione nella PUT parametro %s: %s", parameter_id, e)
             return False
+
+    # 📊 Prestazioni attese (Capacity Tables Baxi, vedi capacity_tables.py)
+    # Stimano Pt/Pel/COP interpolando temperatura esterna e temperatura di
+    # mandata sulla tabella "valori medi" del modello rilevato
+    # (thingModel/thingDefinitionName). None se il modello non è ancora
+    # censito o mancano le temperature.
+    #
+    # La "temperatura di mandata" della Capacity Table è il TARGET che la PDC
+    # sta cercando di produrre, non una lettura istantanea: usiamo quindi
+    # pdc_heating_setpoint_temp ("Set point mandata PDC caldo (calcolato)"),
+    # il target che il firmware stesso calcola per la PDC in modo caldo —
+    # "caldo" qui è l'opposto di "freddo" (raffrescamento), non "sanitario"
+    # opposto a "riscaldamento": il valore è già lo stesso sia che la PDC
+    # stia producendo sanitario sia che stia scaldando il circuito a
+    # pavimento, perché il firmware unifica da solo quale delle due
+    # richieste sta servendo in questo momento (nessuna logica aggiuntiva
+    # necessaria qui per distinguerle).
+    # Niente fallback su pdc_exit_temp: è una lettura, non un target, e può
+    # restare "in eredità" a un valore residuo quando la PDC è ferma (stesso
+    # problema che aveva boiler_flow_temp) — meglio unavailable che un
+    # numero plausibile ma non significativo. Se il modello/firmware non
+    # pubblica il calcolato, i tre sensori restano semplicemente unavailable.
+    #
+    # A PDC ferma (idle, nessuna richiesta attiva né sanitario né
+    # riscaldamento) il "calcolato" può riportare un placeholder ben sotto
+    # le mandate reali di riscaldamento (osservato: 10°C con 30°C esterni,
+    # PDC idle) invece del target dell'ultima/prossima richiesta.
+    #
+    # Segnale primario "PDC in azione": status_pdc ("Stato PDC") — "0000"
+    # confermato essere il codice a PDC ferma (osservato "0001" durante una
+    # produzione sanitaria attiva). Se il thingDefinition non pubblica
+    # status_pdc, ripieghiamo su power_pdc (potenza istantanea %, 0/assente
+    # = ferma) — anche questo non pubblicato da tutti i thingDefinition
+    # (osservato: null su un device reale anche a PDC confermata attiva).
+    # Se manca anche quello, ripieghiamo sul controllo di range esistente:
+    # la Capacity Table parte da min_flow_temp (25°C), sotto quel limite il
+    # produttore non pubblica dati e non è comunque interpolabile in modo
+    # affidabile — trattiamo un valore inferiore come "nessuna richiesta di
+    # calore in corso" invece di clampare al bordo della tabella e
+    # mostrare un numero plausibile ma senza significato.
+    def _expected_capacity_point(self):
+        if self.temp_ext is None or self.pdc_heating_setpoint_temp is None:
+            return None
+        if self.status_pdc is not None:
+            if self.status_pdc == "0000":
+                return None
+        elif self.power_pdc is not None and self.power_pdc <= 0:
+            return None
+        model = find_capacity_model(self.thingModel, self.thingDefinitionName)
+        if model is None:
+            return None
+        if self.pdc_heating_setpoint_temp < min_flow_temp(model.heating):
+            return None
+        return interpolate(model.heating, self.temp_ext, self.pdc_heating_setpoint_temp)
+
+    @property
+    def expected_thermal_power(self):
+        point = self._expected_capacity_point()
+        return point.pt if point else None
+
+    @property
+    def expected_electric_power(self):
+        point = self._expected_capacity_point()
+        return point.pel if point else None
+
+    @property
+    def expected_cop(self):
+        point = self._expected_capacity_point()
+        return point.cop if point else None
 

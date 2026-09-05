@@ -5,7 +5,7 @@ custom_components/baxi_hybridapp_home/sensor.py
 """
 
 from homeassistant.components.sensor import SensorEntity, SensorDeviceClass, SensorStateClass
-from homeassistant.const import UnitOfTemperature, UnitOfPressure, PERCENTAGE
+from homeassistant.const import UnitOfTemperature, UnitOfPressure, UnitOfPower, PERCENTAGE
 from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from homeassistant.util import dt as dt_util
@@ -140,6 +140,24 @@ class PDCReturnTempSensor(BaxiBaseSensor):
             unit=UnitOfTemperature.CELSIUS,
             device_class=SensorDeviceClass.TEMPERATURE,
             icon="mdi:thermometer"
+        )
+
+class PDCHeatingSetpointTempSensor(BaxiBaseSensor):
+    # Target di mandata calcolato dal firmware per la PDC in modo caldo:
+    # stesso valore sia in produzione sanitaria che in riscaldamento a
+    # pavimento (il firmware unifica da solo la richiesta attiva). Usato
+    # come input per i sensori "attesi" (COP/Pt/Pel), vedi
+    # api._expected_capacity_point.
+    def __init__(self, coordinator, api):
+        super().__init__(
+            coordinator,
+            api,
+            name="Setpoint Mandata PDC (Calcolato)",
+            unique_id="baxi_pdc_heating_setpoint_temperature",
+            value_key="pdc_heating_setpoint_temp",
+            unit=UnitOfTemperature.CELSIUS,
+            device_class=SensorDeviceClass.TEMPERATURE,
+            icon="mdi:target"
         )
 
 class SetpointInstantTempSensor(BaxiBaseSensor):
@@ -703,6 +721,95 @@ class FailureCount7dSensor(BaxiBaseSensor):
         )
 
 
+# 📊 Prestazioni attese (Capacity Tables Baxi): COP, Pt, Pel interpolati da
+# temperatura esterna + target di mandata PDC, vedi
+# api._expected_capacity_point. Il target ("Set point mandata PDC caldo
+# (calcolato)") è calcolato dal firmware ed è già lo stesso valore sia in
+# produzione sanitaria che in riscaldamento a pavimento — nessuna logica
+# aggiuntiva qui per distinguere le due utenze. Nessun fallback su letture
+# (pdc_exit_temp/boiler_flow_temp): se il thingDefinition non pubblica il
+# calcolato, questi sensori restano unavailable invece di stimare da un
+# valore che potrebbe essere residuo/non significativo a PDC ferma.
+# A PDC idle il calcolato può riportare un placeholder ben sotto le
+# mandate reali (osservato: 10°C con 30°C esterni, nessuna richiesta
+# attiva): api._expected_capacity_point richiede status_pdc diverso da
+# "0000" (o, in fallback, power_pdc > 0) quando disponibile, e scarta
+# comunque i valori sotto min_flow_temp() della tabella del modello —
+# sensori unavailable in tutti questi casi.
+# Unavailable finché il modello (thingModel) non è censito in capacity_tables.py.
+class _ExpectedCapacityMixin:
+    """extra_state_attributes comune: quali letture hanno prodotto il valore."""
+
+    @property
+    def extra_state_attributes(self):
+        return {
+            "modello": getattr(self._api, "thingModel", None),
+            "temp_esterna": getattr(self._api, "temp_ext", None),
+            "temp_mandata_pdc_setpoint": getattr(self._api, "pdc_heating_setpoint_temp", None),
+            "fonte_dati": "Capacity Tables Baxi (EN 14511, valori medi)",
+        }
+
+
+class ExpectedCOPSensor(_ExpectedCapacityMixin, BaxiBaseSensor):
+    def __init__(self, coordinator, api):
+        super().__init__(
+            coordinator,
+            api,
+            name="COP Atteso",
+            unique_id="baxi_expected_cop",
+            value_key="expected_cop",
+            unit=None,
+            device_class=None,
+            icon="mdi:sync-circle",
+        )
+        self._attr_suggested_display_precision = 2
+
+    @property
+    def native_value(self):
+        val = getattr(self._api, self._value_key, None)
+        return round(val, 2) if val is not None else None
+
+
+class ExpectedThermalPowerSensor(_ExpectedCapacityMixin, BaxiBaseSensor):
+    def __init__(self, coordinator, api):
+        super().__init__(
+            coordinator,
+            api,
+            name="Potenza Termica Attesa (Pt)",
+            unique_id="baxi_expected_thermal_power",
+            value_key="expected_thermal_power",
+            unit=UnitOfPower.KILO_WATT,
+            device_class=SensorDeviceClass.POWER,
+            icon="mdi:radiator",
+        )
+        self._attr_suggested_display_precision = 2
+
+    @property
+    def native_value(self):
+        val = getattr(self._api, self._value_key, None)
+        return round(val, 2) if val is not None else None
+
+
+class ExpectedElectricPowerSensor(_ExpectedCapacityMixin, BaxiBaseSensor):
+    def __init__(self, coordinator, api):
+        super().__init__(
+            coordinator,
+            api,
+            name="Potenza Elettrica Attesa (Pel)",
+            unique_id="baxi_expected_electric_power",
+            value_key="expected_electric_power",
+            unit=UnitOfPower.KILO_WATT,
+            device_class=SensorDeviceClass.POWER,
+            icon="mdi:flash",
+        )
+        self._attr_suggested_display_precision = 2
+
+    @property
+    def native_value(self):
+        val = getattr(self._api, self._value_key, None)
+        return round(val, 2) if val is not None else None
+
+
 # 🔒 Classe sensori energia
 class BaxiEnergySensor(BaxiBaseSensor):
     def __init__(self, coordinator, api, description):
@@ -762,6 +869,7 @@ async def async_setup_entry(hass, entry, async_add_entities):
         DHWAuxStorageTempSensor(coordinator, api),
         PDCExitTempSensor(coordinator, api),
         PDCReturnTempSensor(coordinator, api),
+        PDCHeatingSetpointTempSensor(coordinator, api),
         SetpointInstantTempSensor(coordinator, api),
         SetpointComfortTempSensor(coordinator, api),
         SetpointEcoTempSensor(coordinator, api),
@@ -781,6 +889,10 @@ async def async_setup_entry(hass, entry, async_add_entities):
         # contatori alert per dashboard
         FailureCount24hSensor(coordinator, api),
         FailureCount7dSensor(coordinator, api),
+        # prestazioni attese da Capacity Tables Baxi
+        ExpectedCOPSensor(coordinator, api),
+        ExpectedThermalPowerSensor(coordinator, api),
+        ExpectedElectricPowerSensor(coordinator, api),
     ]
     # affianco i nuovi sensori energia
     sensors.extend(
