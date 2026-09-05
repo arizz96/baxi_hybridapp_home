@@ -911,19 +911,25 @@ class BaxiHybridAppAPI:
     # le mandate reali di riscaldamento (osservato: 10°C con 30°C esterni,
     # PDC idle) invece del target dell'ultima/prossima richiesta.
     #
-    # Segnale primario "PDC in azione": power_pdc (potenza istantanea %) —
-    # 0/assente = ferma. Non è però pubblicata da tutti i thingDefinition
-    # (osservato: null su un device reale anche a PDC confermata attiva in
-    # produzione sanitaria), quindi se manca ripieghiamo sul controllo di
-    # range esistente: la Capacity Table parte da min_flow_temp (25°C),
-    # sotto quel limite il produttore non pubblica dati e non è comunque
-    # interpolabile in modo affidabile — trattiamo un valore inferiore come
-    # "nessuna richiesta di calore in corso" invece di clampare al bordo
-    # della tabella e mostrare un numero plausibile ma senza significato.
+    # Segnale primario "PDC in azione": status_pdc ("Stato PDC") — "0000"
+    # confermato essere il codice a PDC ferma (osservato "0001" durante una
+    # produzione sanitaria attiva). Se il thingDefinition non pubblica
+    # status_pdc, ripieghiamo su power_pdc (potenza istantanea %, 0/assente
+    # = ferma) — anche questo non pubblicato da tutti i thingDefinition
+    # (osservato: null su un device reale anche a PDC confermata attiva).
+    # Se manca anche quello, ripieghiamo sul controllo di range esistente:
+    # la Capacity Table parte da min_flow_temp (25°C), sotto quel limite il
+    # produttore non pubblica dati e non è comunque interpolabile in modo
+    # affidabile — trattiamo un valore inferiore come "nessuna richiesta di
+    # calore in corso" invece di clampare al bordo della tabella e
+    # mostrare un numero plausibile ma senza significato.
     def _expected_capacity_point(self):
         if self.temp_ext is None or self.pdc_heating_setpoint_temp is None:
             return None
-        if self.power_pdc is not None and self.power_pdc <= 0:
+        if self.status_pdc is not None:
+            if self.status_pdc == "0000":
+                return None
+        elif self.power_pdc is not None and self.power_pdc <= 0:
             return None
         model = find_capacity_model(self.thingModel, self.thingDefinitionName)
         if model is None:
