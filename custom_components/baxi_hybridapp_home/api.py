@@ -21,6 +21,21 @@ from .metrics import SIMPLE_METRICS, SimpleMetricSpec, ENERGY_SENSOR_TYPES
 
 _LOGGER = logging.getLogger(__name__)
 
+# metricName del solo scheduler sanitario (non tabellare, non in
+# SIMPLE_METRICS/ENERGY_SENSOR_TYPES: ha logica di parsing custom, vedi
+# fetch_sanitary_scheduler/_compute_sanitary_schedule_state).
+_SANITARY_SCHEDULER_METRIC_NAME = "Schedulatore - Sanitario"
+
+# Tutti i metricName che l'integrazione legge effettivamente (~33), usati per
+# la richiesta "all-in-one" di fetch_all_metric_values: NON l'intero catalogo
+# cloud del modello (~250 metriche), solo quelle wired. dict.fromkeys()
+# preserva l'ordine ed elimina eventuali doppioni.
+_WIRED_METRIC_NAMES: tuple[str, ...] = tuple(dict.fromkeys(
+    [spec.metric_name for spec in SIMPLE_METRICS]
+    + [desc.metric_name for desc in ENERGY_SENSOR_TYPES]
+    + [_SANITARY_SCHEDULER_METRIC_NAME]
+))
+
 
 class BaxiApiError(Exception):
     """Errore generico dell'API Baxi Servitly."""
@@ -72,6 +87,11 @@ class BaxiHybridAppAPI:
         self.serialNumber = None
         self.thingDefinitionId = None    # ID del modello (thingDefinition), non del device
         self.thingDefinitionName = None  # Nome commerciale del modello (es. "CSI IN SPLIT E")
+
+        # Cache dell'ultimo snapshot "all-in-one" di /data/values (popolata da
+        # fetch_all_metric_values, chiave = nome leggibile della metrica, come
+        # SIMPLE_METRICS[].metric_name).
+        self._latest_metric_values: dict[str, dict] = {}
 
         # Metriche "semplici": un attributo + timestamp per ciascuna voce della
         # tabella SIMPLE_METRICS (definita a livello modulo). Aggiungerne una
@@ -256,6 +276,88 @@ class BaxiHybridAppAPI:
             result[key] = data if isinstance(data, list) else []
         return result
 
+    def _bulk_metric_values_url(self, metric_names: tuple[str, ...]) -> str:
+        if not self.thingId:
+            raise RuntimeError("thingId non inizializzato")
+        params = "&".join(f"metricName={quote_plus(n)}" for n in metric_names)
+        return f"{self.BASE_URL}/data/values?thingId={self.thingId}&pageSize=1&{params}"
+
+    def fetch_all_metric_values(self) -> None:
+        """
+        Scarica in UNA sola richiesta HTTP il valore corrente di tutte le
+        metriche effettivamente lette dall'integrazione (_WIRED_METRIC_NAMES,
+        ~33 nomi: SIMPLE_METRICS + ENERGY_SENSOR_TYPES + scheduler
+        sanitario), passando un filtro metricName ripetuto invece di fare
+        una richiesta separata per ciascuna. NON scarica l'intero catalogo
+        cloud del modello (~250 metriche): solo quelle wired.
+
+        Il comportamento di /data/values con più metricName ripetuti non è
+        documentato: non sappiamo se la risposta etichetta esplicitamente
+        ogni elemento con la metrica richiesta, o se dobbiamo dedurlo
+        dall'ordine. Gestiamo entrambi i casi in modo "fail safe": se non
+        c'è modo di far corrispondere ogni elemento a una metrica in modo
+        univoco, scartiamo l'intera risposta per questo ciclo (i sensori
+        risultano temporaneamente "non disponibili", lo stesso comportamento
+        già previsto per una singola metrica assente — issue #6) piuttosto
+        che rischiare di assegnare un valore alla metrica sbagliata.
+
+        Popola self._latest_metric_values (chiave = nome leggibile della
+        metrica, es. "Pressione impianto") per il resto del ciclo di
+        polling. fetch_simple_metrics, fetch_sanitary_scheduler e
+        fetch_energy_metrics leggono da questa cache invece di fare le
+        proprie richieste HTTP: va quindi chiamato prima di loro, una volta
+        per ciclo (vedi coordinator._async_update_data).
+        """
+        self._latest_metric_values = {}
+        if not self.thingId:
+            return
+
+        url = self._bulk_metric_values_url(_WIRED_METRIC_NAMES)
+        data = self._make_request(url)
+        items = (data or {}).get("data") or []
+        if not items:
+            return
+
+        def _explicit_name(item: dict) -> str | None:
+            """Prova a leggere quale metricName ha prodotto questo elemento,
+            se la risposta lo etichetta esplicitamente (non documentato,
+            verificato in modo difensivo su qualche nome di campo plausibile)."""
+            values = item.get("values") or []
+            first = values[0] if values else {}
+            for source in (item, first):
+                for key in ("metricName", "metric"):
+                    candidate = source.get(key)
+                    if candidate in _WIRED_METRIC_NAMES:
+                        return candidate
+            return None
+
+        explicit_names = [_explicit_name(item) for item in items]
+        if all(explicit_names):
+            pairs = list(zip(explicit_names, items))
+        elif len(items) == len(_WIRED_METRIC_NAMES):
+            # Nessuna etichetta esplicita, ma il conteggio combacia esattamente
+            # con quello richiesto: assumiamo l'ordine preservato.
+            pairs = list(zip(_WIRED_METRIC_NAMES, items))
+        else:
+            _LOGGER.warning(
+                "⚠️ fetch_all_metric_values: risposta bulk non mappabile in modo "
+                "univoco (%d elementi per %d metriche richieste) — scartata per "
+                "questo ciclo, i sensori risulteranno temporaneamente non disponibili.",
+                len(items), len(_WIRED_METRIC_NAMES),
+            )
+            return
+
+        result: dict[str, dict] = {}
+        for name, item in pairs:
+            values = item.get("values") or []
+            raw_value = values[0].get("value") if values else None
+            result[name] = {"value": raw_value, "timestamp": item.get("timestamp")}
+        self._latest_metric_values = result
+        _LOGGER.debug(
+            "📥 fetch_all_metric_values: %d/%d metriche wired lette in 1 richiesta HTTP.",
+            len(result), len(_WIRED_METRIC_NAMES),
+        )
+
     def _auth_headers(self) -> dict:
         """Header per le chiamate autenticate (gli altri stanno sulla session)."""
         return {'authorization': f'Bearer {self.token}'} if self.token else {}
@@ -339,16 +441,6 @@ class BaxiHybridAppAPI:
             _LOGGER.exception("❌ Eccezione nella richiesta a %s: %s", url, e)
             return None
 
-    def _metric_url(self, metric_name: str) -> str:
-        if not self.thingId:
-            raise RuntimeError("thingId non inizializzato")
-        return (
-            f"{self.BASE_URL}/data/values?"
-            f"thingId={self.thingId}"
-            f"&pageSize=1"
-            f"&metricName={quote_plus(metric_name)}"
-        )
-
     # Sentinelle "no data" pubblicate da Servitly: il valore esiste ma la misura
     # è assente (tipico per metriche non applicabili al device, es. flame status
     # su impianto solo elettrico — issue #6).
@@ -357,33 +449,31 @@ class BaxiHybridAppAPI:
     # ---------------- Dispatcher metriche semplici ----------------
     def _fetch_one(self, spec: SimpleMetricSpec) -> None:
         """
-        Legge una singola metrica e memorizza valore + timestamp.
+        Legge una singola metrica dalla cache popolata da
+        fetch_all_metric_values() (nessuna richiesta HTTP qui) e memorizza
+        valore + timestamp.
 
         Casi gestiti (issue #6 — Baxi solo elettrica / metriche non applicabili
         al device):
-          - data["data"] == []          → attributo None, log debug (NON è errore)
-          - value in _NO_DATA_SENTINELS → attributo None, log debug
-          - parsing fail 'vero'         → attributo None, log warning + estratto JSON
+          - metrica assente dall'ultimo evento telemetrico → attributo None, log debug (NON è errore)
+          - value in _NO_DATA_SENTINELS                    → attributo None, log debug
+          - parsing fail 'vero'                             → attributo None, log warning + estratto valore
         In tutti i casi l'attributo viene azzerato: l'entità HA risulta unavailable.
         """
-        data = self._make_request(self._metric_url(spec.metric_name))
-        if not data:
-            return
+        entry = self._latest_metric_values.get(spec.metric_name)
 
-        # Caso 1: la metrica non è esposta dal device → "data" è un array vuoto.
-        items = data.get("data") or []
-        if not items:
+        # Caso 1: la metrica non è esposta dal device (o assente dall'ultimo evento).
+        if entry is None:
             setattr(self, spec.attr, None)
             setattr(self, f"{spec.attr}_timestamp", None)
             _LOGGER.debug(
-                "ℹ️ %s non disponibile su questo device (data vuoto)",
+                "ℹ️ %s non disponibile su questo device (assente dall'ultimo evento telemetrico)",
                 spec.metric_name,
             )
             return
 
         try:
-            item = items[0]
-            raw = item["values"][0]["value"]
+            raw = entry["value"]
 
             # Caso 2: metrica esposta ma senza misura corrente (sentinella).
             if isinstance(raw, str) and raw.strip() in self._NO_DATA_SENTINELS:
@@ -397,18 +487,19 @@ class BaxiHybridAppAPI:
 
             value = spec.parser(raw)
             setattr(self, spec.attr, value)
-            setattr(self, f"{spec.attr}_timestamp", item["timestamp"])
+            setattr(self, f"{spec.attr}_timestamp", entry["timestamp"])
             _LOGGER.debug("%s %s = %s", spec.log_emoji, spec.metric_name, value)
         except (KeyError, IndexError, ValueError, TypeError) as e:
             setattr(self, spec.attr, None)
             setattr(self, f"{spec.attr}_timestamp", None)
             _LOGGER.warning(
-                "⚠️ Parsing fallito (%s): %s — response: %s",
-                spec.metric_name, e, json.dumps(data)[:300],
+                "⚠️ Parsing fallito (%s): %s — entry: %s",
+                spec.metric_name, e, json.dumps(entry)[:300],
             )
 
     def fetch_simple_metrics(self) -> None:
-        """Legge in sequenza tutte le metriche definite in SIMPLE_METRICS."""
+        """Legge tutte le metriche definite in SIMPLE_METRICS dalla cache
+        popolata da fetch_all_metric_values() (nessuna richiesta HTTP qui)."""
         for spec in SIMPLE_METRICS:
             self._fetch_one(spec)
 
@@ -419,20 +510,22 @@ class BaxiHybridAppAPI:
     # 🔴 Sensori energia
     def fetch_energy_metrics(self):
         """
-        Legge tutte le metriche energia definite in ENERGY_SENSOR_TYPES.
-        Salva i valori su self.<key> e (opzionale) i timestamp su self.energy_timestamp[key].
+        Legge tutte le metriche energia definite in ENERGY_SENSOR_TYPES dalla
+        cache popolata da fetch_all_metric_values() (nessuna richiesta HTTP
+        qui). Salva i valori su self.<key> e (opzionale) i timestamp su
+        self.energy_timestamp[key].
         """
         for desc in ENERGY_SENSOR_TYPES:
+            entry = None
             try:
-                data = self._make_request(self._metric_url(desc.metric_name))
-                if not data:
+                entry = self._latest_metric_values.get(desc.metric_name)
+                if entry is None:
                     setattr(self, desc.key, None)
                     self.energy_timestamp[desc.key] = None
                     continue
 
-                item = data["data"][0]
-                raw_val = item["values"][0]["value"]
-                ts = item.get("timestamp")
+                raw_val = entry["value"]
+                ts = entry.get("timestamp")
 
                 # prova a convertire in float (Servitly spesso manda stringhe)
                 try:
@@ -446,7 +539,7 @@ class BaxiHybridAppAPI:
                         ts / 1000, tz=dt_util.DEFAULT_TIME_ZONE
                     ).date()
                     today_local_date = dt_util.now().date()
-                
+
                     # Se il campione non è di oggi, forza 0 finché non arriva il nuovo giorno
                     if sample_local_date != today_local_date:
                         val = 0.0
@@ -460,29 +553,29 @@ class BaxiHybridAppAPI:
                 setattr(self, desc.key, None)
                 self.energy_timestamp[desc.key] = None
                 _LOGGER.warning(
-                    "⚠️ Parsing fallito (energia: %s): %s — response 📦: %s",
-                    desc.metric_name, e, json.dumps(data)[:300] if 'data' in locals() and data else "None"
+                    "⚠️ Parsing fallito (energia: %s): %s — entry 📦: %s",
+                    desc.metric_name, e, json.dumps(entry)[:300] if entry else "None"
                 )
 
 
     def fetch_sanitary_scheduler(self):
-        data = self._make_request(self._metric_url("Schedulatore - Sanitario"))
-        if not data:
+        """Legge lo scheduler sanitario dalla cache popolata da
+        fetch_all_metric_values() (nessuna richiesta HTTP qui)."""
+        entry = self._latest_metric_values.get(_SANITARY_SCHEDULER_METRIC_NAME)
+        if entry is None:
             self.sanitary_scheduler_status = "error"
             return
         try:
-            item = data["data"][0]
-            raw_str = item["values"][0]["value"]  # è una stringa JSON
+            raw_str = entry["value"]  # è una stringa JSON
             self.sanitary_scheduler_raw = raw_str
             self._compute_sanitary_schedule_state(raw_str)
             self.sanitary_scheduler_status = "ok"
             _LOGGER.debug("📅 Schedulatore Sanitario: %s", self.sanitary_scheduler_raw)
         except (KeyError, IndexError, ValueError, TypeError) as e:
-            # Azzera il campo, warning + debug 'data'
+            # Azzera il campo, warning + debug 'entry'
             self.sanitary_scheduler_raw = None
             self.sanitary_scheduler_status = "error"
-            _LOGGER.warning("⚠️ Parsing fallito (Schedulatore sanitario): %s — response 📦: %s", e, json.dumps(data)[:300])
-            _LOGGER.debug("📦 Contenuto data (Schedulatore sanitario): %s", data)
+            _LOGGER.warning("⚠️ Parsing fallito (Schedulatore sanitario): %s — entry 📦: %s", e, json.dumps(entry)[:300])
     
     def _compute_sanitary_schedule_state(self, raw_str, now_dt: datetime | None = None):
         """
