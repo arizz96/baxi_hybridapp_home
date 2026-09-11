@@ -23,7 +23,7 @@ _LOGGER = logging.getLogger(__name__)
 
 # metricName del solo scheduler sanitario (non tabellare, non in
 # SIMPLE_METRICS/ENERGY_SENSOR_TYPES: ha logica di parsing custom, vedi
-# fetch_sanitary_scheduler/_compute_sanitary_schedule_state).
+# apply_sanitary_scheduler/_compute_sanitary_schedule_state).
 _SANITARY_SCHEDULER_METRIC_NAME = "Schedulatore - Sanitario"
 
 # Tutti i metricName che l'integrazione legge effettivamente (~34), usati per
@@ -104,7 +104,7 @@ class BaxiHybridAppAPI:
             setattr(self, f"{spec.attr}_timestamp", None)
 
         # Scheduler sanitario: parsing JSON con logica derivata custom
-        # (vedi fetch_sanitary_scheduler / _compute_sanitary_schedule_state).
+        # (vedi apply_sanitary_scheduler / _compute_sanitary_schedule_state).
         self.sanitary_scheduler_raw = None           # JSON string proveniente dall'API
         self.sanitary_mode_now = None                # "Comfort" | "Eco"
         self.sanitary_next_change = None             # datetime (tz-aware) del prossimo cambio
@@ -376,8 +376,8 @@ class BaxiHybridAppAPI:
 
         Sostituisce le ~34 richieste sequenziali fatte finora con 1 sola
         chiamata HTTP. Popola self._latest_metric_values (chiave =
-        metricName) per il resto del ciclo di polling: fetch_simple_metrics,
-        fetch_sanitary_scheduler e fetch_energy_metrics leggono da questa
+        metricName) per il resto del ciclo di polling: apply_simple_metrics,
+        apply_sanitary_scheduler e apply_energy_metrics leggono da questa
         cache invece di fare le proprie richieste HTTP, quindi va chiamato
         prima di loro, una volta per ciclo (vedi
         coordinator._async_update_data).
@@ -411,9 +411,9 @@ class BaxiHybridAppAPI:
     _NO_DATA_SENTINELS = frozenset({"---", ""})
 
     # ---------------- Dispatcher metriche semplici ----------------
-    def _fetch_one(self, spec: SimpleMetricSpec) -> None:
+    def _apply_one(self, spec: SimpleMetricSpec) -> None:
         """
-        Legge una singola metrica dalla cache popolata da
+        Applica una singola metrica dalla cache popolata da
         fetch_all_metric_values() (nessuna richiesta HTTP qui) e memorizza
         valore + timestamp.
 
@@ -461,22 +461,22 @@ class BaxiHybridAppAPI:
                 spec.metric_name, e, json.dumps(entry)[:300],
             )
 
-    def fetch_simple_metrics(self) -> None:
-        """Legge tutte le metriche definite in SIMPLE_METRICS dalla cache
+    def apply_simple_metrics(self) -> None:
+        """Applica tutte le metriche definite in SIMPLE_METRICS dalla cache
         popolata da fetch_all_metric_values() (nessuna richiesta HTTP qui)."""
         for spec in SIMPLE_METRICS:
-            self._fetch_one(spec)
+            self._apply_one(spec)
 
     # ----- I vecchi fetch_<metrica> per-attributo sono stati collassati in -----
-    # fetch_simple_metrics() + SIMPLE_METRICS (dispatcher tabellare, vedi sopra).
-    # Restano qui sotto solo i fetch con logica non-banale: energia e scheduler.
+    # apply_simple_metrics() + SIMPLE_METRICS (dispatcher tabellare, vedi sopra).
+    # Restano qui sotto solo i dispatcher con logica non-banale: energia e scheduler.
 
     # 🔴 Sensori energia
-    def fetch_energy_metrics(self):
+    def apply_energy_metrics(self):
         """
-        Legge tutte le metriche energia definite in ENERGY_SENSOR_TYPES dalla
-        cache popolata da fetch_all_metric_values() (nessuna richiesta HTTP
-        qui). Salva i valori su self.<key> e (opzionale) i timestamp su
+        Applica tutte le metriche energia definite in ENERGY_SENSOR_TYPES
+        dalla cache popolata da fetch_all_metric_values() (nessuna richiesta
+        HTTP qui). Salva i valori su self.<key> e (opzionale) i timestamp su
         self.energy_timestamp[key].
         """
         for desc in ENERGY_SENSOR_TYPES:
@@ -522,8 +522,8 @@ class BaxiHybridAppAPI:
                 )
 
 
-    def fetch_sanitary_scheduler(self):
-        """Legge lo scheduler sanitario dalla cache popolata da
+    def apply_sanitary_scheduler(self):
+        """Applica lo scheduler sanitario dalla cache popolata da
         fetch_all_metric_values() (nessuna richiesta HTTP qui)."""
         entry = self._latest_metric_values.get(_SANITARY_SCHEDULER_METRIC_NAME)
         if entry is None:

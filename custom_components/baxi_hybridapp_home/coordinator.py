@@ -104,13 +104,13 @@ class BaxiDataUpdateCoordinator(DataUpdateCoordinator):
         # dispatcher tabellare, vedi SIMPLE_METRICS in metrics.py. Nessuna
         # richiesta HTTP qui: legge dalla cache popolata sopra, quindi
         # nessun executor job necessario.
-        self.api.fetch_simple_metrics()
+        self.api.apply_simple_metrics()
         # Scheduler sanitario (parsing JSON con logica derivata custom):
         # anche questo legge dalla cache, nessun executor job necessario.
-        self.api.fetch_sanitary_scheduler()
+        self.api.apply_sanitary_scheduler()
         # Sensori energia (tabellari via ENERGY_SENSOR_TYPES in metrics.py):
         # idem, legge dalla cache.
-        self.api.fetch_energy_metrics()
+        self.api.apply_energy_metrics()
         # Historical alerts (FAILURE/WARNING): popola active/last/conteggi
         # sull'istanza API e accoda i nuovi alert in api.new_alerts_pending.
         await self.hass.async_add_executor_job(self.api.fetch_historical_alerts)
