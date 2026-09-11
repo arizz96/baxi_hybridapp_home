@@ -94,6 +94,12 @@ class BaxiDataUpdateCoordinator(DataUpdateCoordinator):
         # Log DOPO auth+thingId: thingModel e thingDefinitionName sono garantiti
         self._log_fetch_info()
         await self._async_log_capabilities_once()
+        # Un'unica richiesta bulk (/data/lastValues) per tutte le metriche
+        # wired dall'integrazione (SIMPLE_METRICS + ENERGY_SENSOR_TYPES +
+        # scheduler sanitario), al posto di una richiesta separata per
+        # ciascuna. Popola api._latest_metric_values, letta dai tre
+        # dispatcher sotto senza ulteriori chiamate HTTP.
+        await self.hass.async_add_executor_job(self.api.fetch_all_metric_values)
         # Metriche "semplici" (un valore per metric_name): tutte in un unico
         # dispatcher tabellare, vedi SIMPLE_METRICS in metrics.py.
         await self.hass.async_add_executor_job(self.api.fetch_simple_metrics)
