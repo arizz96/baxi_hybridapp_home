@@ -34,6 +34,7 @@ This extension is only compatible with devices:
 - **DHW Auxiliary Storage Temperature** — auxiliary tank temperature
 - **PDC Exit Temperature** — heat pump outlet temperature
 - **PDC Return Temperature** — heat pump return temperature
+- **Setpoint Mandata PDC (Calcolato)** — firmware-calculated target flow temperature for the heat pump in heating mode (same value whether it's currently producing DHW or heating the floor loop)
 - **Sanitary Setpoint Instantaneous** — current target DHW temperature
 - **Sanitary Setpoint Comfort** — comfort mode setpoint
 - **Sanitary Setpoint Eco** — eco mode setpoint
@@ -45,6 +46,11 @@ This extension is only compatible with devices:
 ### ⚡ Power Sensors
 - **Boiler Instantaneous Power** — current boiler power output
 - **PDC Instantaneous Power** — current heat pump power output
+- **COP Atteso** — expected heat pump COP, interpolated from the manufacturer's Capacity Tables using current external temperature and the PDC's target flow temperature
+- **Potenza Termica Attesa (Pt)** — expected thermal power output (kW), same interpolation
+- **Potenza Elettrica Attesa (Pel)** — expected electric power draw (kW), same interpolation
+
+The three "attesa/expected" sensors are computed, not read from the cloud: they look up the manufacturer's published Capacity Tables (EN 14511, "valori medi") for your detected device model and interpolate on external temperature × flow temperature. The flow-temperature input is `pdc_heating_setpoint_temp` ("Set point mandata PDC caldo (calcolato)") — the *target* flow temperature the firmware itself calculates for the heat pump in heating mode ("caldo" vs. "freddo"/cooling, not DHW vs. floor heating). The heat pump serves both the DHW tank and the floor heating circuit, one at a time, through a diverter valve, and this calculated setpoint is already the same value regardless of which of the two it's currently serving — no extra logic needed here to tell them apart. There's no fallback to a measured reading (`pdc_exit_temp`/`boiler_flow_temp`) if a device model doesn't publish that metric: these sensors just stay `unavailable` rather than estimating from a value that could be stale/residual while the compressor is idle. The calculated setpoint can also report a low placeholder value while the PDC is idle (observed: 10 °C with 30 °C outside, no active heat demand) instead of a real target. These sensors require `status_pdc` (PDC Status) to be different from `"0000"` (the confirmed off code) when that metric is published; if it isn't, they fall back to `power_pdc` (PDC instantaneous power) being above zero, and if neither is available, to checking the setpoint against the Capacity Table's own range — it only publishes data from 25 °C flow upward, so anything below that is treated as "no active request" regardless. Currently only the **AWHP2R 8MR** model is catalogued (see [`capacity_tables.py`](custom_components/baxi_hybridapp_home/capacity_tables.py)); on any other model these sensors stay `unavailable`. More models can be added over time by contributing their Capacity Tables PDF.
 
 ### 🧭 Mode / Status Sensors
 - **System Mode** — current operating mode (Automatico, Standby, Solo Sanitario)

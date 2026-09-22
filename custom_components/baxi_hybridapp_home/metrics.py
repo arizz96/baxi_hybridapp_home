@@ -99,6 +99,12 @@ SIMPLE_METRICS: tuple[SimpleMetricSpec, ...] = (
     SimpleMetricSpec("dhw_aux_storage_temp", "Sonda accumulo ausiliario", _parse_float, log_emoji="🌡️"),
     SimpleMetricSpec("pdc_exit_temp", "Temperatura uscita pdc", _parse_float, log_emoji="🌡️"),
     SimpleMetricSpec("pdc_return_temp", "Temperatura ritorno pdc", _parse_float, log_emoji="🌡️"),
+    # Target di mandata calcolato dal firmware per la PDC in modo caldo:
+    # unifica da solo sanitario/riscaldamento (qualunque richiesta stia
+    # servendo in questo momento), a differenza di boiler_flow_temp/
+    # pdc_exit_temp che sono letture, non il target — vedi
+    # api._expected_capacity_point.
+    SimpleMetricSpec("pdc_heating_setpoint_temp", "Set point mandata PDC caldo (calcolato)", _parse_float, log_emoji="🎯"),
     SimpleMetricSpec("setpoint_instant_temp", "Set-point sanitario istantaneo", _parse_float, log_emoji="🌡️"),
     SimpleMetricSpec("setpoint_comfort_temp", "Set-point sanitario comfort", _parse_float, log_emoji="🌡️"),
     SimpleMetricSpec("setpoint_eco_temp", "Set-point sanitario eco", _parse_float, log_emoji="🌡️"),
