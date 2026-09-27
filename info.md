@@ -41,6 +41,7 @@ Custom integration for [Home Assistant](https://home-assistant.io) to monitor an
 
 🛁 **Water Heater Entities**
 - Adjustable Comfort and Eco DHW setpoints (30–52 °C)
+- DHW scheduler: editable calendar entity (weekly-recurring Comfort slots) plus a `set_sanitary_schedule` service
 
 🚀 **DHW Boost**
 - Boost button, boost state and maximum duration (10–120 min)
