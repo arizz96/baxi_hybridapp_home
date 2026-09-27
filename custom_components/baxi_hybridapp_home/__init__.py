@@ -22,12 +22,13 @@ from .const import (
     DOMAIN,
     PARAM_ID_SETPOINT_COMFORT, PARAM_ID_SETPOINT_ECO,
     SANITARY_MIN_TEMP, SANITARY_MAX_TEMP,
+    SANITARY_SCHEDULE_DAY_KEYS,
     WRITE_GRACE_SECONDS,
 )
 from .coordinator import BaxiConfigEntry, BaxiDataUpdateCoordinator, BaxiRuntimeData, polling_interval
 
 _LOGGER = logging.getLogger(__name__)
-PLATFORMS = ["sensor", "water_heater", "button", "binary_sensor", "select", "number", "datetime", "switch"]
+PLATFORMS = ["sensor", "water_heater", "button", "binary_sensor", "select", "number", "datetime", "switch", "calendar"]
 
 CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
 
@@ -47,6 +48,17 @@ _SET_SCHEMA = vol.Schema({
         vol.Coerce(int),
         vol.Range(min=SANITARY_MIN_TEMP, max=SANITARY_MAX_TEMP),
     )
+})
+
+_SLOT_SCHEMA = vol.Schema({
+    vol.Required("start"): cv.string,
+    vol.Required("end"): cv.string,
+})
+
+_SCHEDULE_SCHEMA = vol.Schema({
+    vol.Required("day"): vol.In(SANITARY_SCHEDULE_DAY_KEYS),
+    vol.Required("slots"): [_SLOT_SCHEMA],
+    vol.Optional("eco_setpoint"): vol.Coerce(int),
 })
 
 
@@ -100,6 +112,53 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
 
     for service in _SANITARY_SERVICES:
         hass.services.async_register(DOMAIN, service, handle_set_sanitary, schema=_SET_SCHEMA)
+
+    async def handle_set_sanitary_schedule(call: ServiceCall) -> None:
+        """Sostituisce le fasce Comfort di UN giorno dello scheduler sanitario.
+
+        Rilegge lo scheduler dal cloud prima di scrivere (per non sovrascrivere
+        gli altri 6 giorni con dati stantii): vedi api.set_sanitary_day_schedule.
+        """
+        runtime = _loaded_runtime(hass)
+        day = call.data["day"]
+        slots = call.data["slots"]
+        entity_id = (
+            er.async_get(hass).async_get_entity_id("sensor", DOMAIN, "baxi_sanitary_schedule_state")
+            or "sensor.schedulatore_sanitario_stato"
+        )
+
+        try:
+            ok = await hass.async_add_executor_job(
+                runtime.api.set_sanitary_day_schedule, day, slots, call.data.get("eco_setpoint"),
+            )
+        except ValueError as err:
+            raise ServiceValidationError(
+                translation_domain=DOMAIN,
+                translation_key="invalid_sanitary_schedule",
+                translation_placeholders={"day": day, "error": str(err)},
+            ) from err
+        if not ok:
+            raise HomeAssistantError(
+                translation_domain=DOMAIN,
+                translation_key="sanitary_schedule_failed",
+                translation_placeholders={"day": day},
+            )
+
+        _LOGGER.info("✅ Scheduler sanitario %s aggiornato (%d fasce)", day, len(slots))
+        await hass.services.async_call(
+            "logbook", "log",
+            {
+                "name": "Schedulatore Sanitario",
+                "message": f"{day}: {len(slots)} fasce Comfort aggiornate",
+                "entity_id": entity_id,
+            },
+            blocking=False,
+        )
+        hass.async_create_task(_grace_refresh(runtime.coordinator))
+
+    hass.services.async_register(
+        DOMAIN, "set_sanitary_schedule", handle_set_sanitary_schedule, schema=_SCHEDULE_SCHEMA,
+    )
     return True
 
 
