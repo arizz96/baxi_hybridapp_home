@@ -31,3 +31,50 @@ set_eco:
           step: 1
           mode: slider
           unit_of_measurement: "°C"
+
+set_sanitary_schedule:
+  name: Imposta Schedulatore Sanitario
+  description: >-
+    Sostituisce le fasce orarie Comfort di UN giorno dello scheduler sanitario
+    (il resto della settimana non viene toccato). Il tempo fuori dalle fasce
+    indicate resta/torna Eco. Max 8 fasce, allineate a 30 minuti, durata
+    minima 60 minuti, non sovrapposte.
+  fields:
+    day:
+      name: Giorno
+      description: Giorno della settimana da aggiornare.
+      required: true
+      example: "Lun"
+      selector:
+        select:
+          options:
+            - "Lun"
+            - "Mar"
+            - "Mer"
+            - "Gio"
+            - "Ven"
+            - "Sab"
+            - "Dom"
+    slots:
+      name: Fasce Comfort
+      description: >-
+        Elenco delle fasce Comfort del giorno, es.
+        [{start: "07:00", end: "09:00"}, {start: "18:00", end: "22:00"}].
+      required: true
+      example: '[{"start": "07:00", "end": "09:00"}]'
+      selector:
+        object:
+    eco_setpoint:
+      name: Setpoint Eco
+      description: >-
+        Temperatura Eco (°C) da usare fuori dalle fasce Comfort di questo
+        giorno. Se omesso resta invariato il valore già impostato.
+      required: false
+      example: 40
+      selector:
+        number:
+          min: 30
+          max: 52
+          step: 1
+          mode: slider
+          unit_of_measurement: "°C"
