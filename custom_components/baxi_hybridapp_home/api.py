@@ -409,6 +409,28 @@ class BaxiHybridAppAPI:
             len(self._latest_metric_values), len(_WIRED_METRIC_NAMES),
         )
 
+    def fetch_sanitary_scheduler(self) -> None:
+        """
+        Rilegge dal cloud SOLO lo scheduler sanitario (1 richiesta a
+        /data/lastValues) e aggiorna cache e stato, senza toccare le altre
+        metriche. Serve prima di una scrittura, per non sovrascrivere gli
+        altri giorni con dati stantii.
+        """
+        if not self.thingId:
+            return
+        url = (
+            f"{self.BASE_URL}/data/lastValues?thingId={self.thingId}"
+            f"&metricName={quote_plus(_SANITARY_SCHEDULER_METRIC_NAME)}"
+        )
+        data = self._make_request(url)
+        for item in (data or {}).get("data") or []:
+            if item.get("metric") == _SANITARY_SCHEDULER_METRIC_NAME:
+                self._latest_metric_values[_SANITARY_SCHEDULER_METRIC_NAME] = {
+                    "value": item.get("value"), "timestamp": item.get("ts"),
+                }
+                self.apply_sanitary_scheduler()
+                return
+
     # Sentinelle "no data" pubblicate da Servitly: il valore esiste ma la misura
     # è assente (tipico per metriche non applicabili al device, es. flame status
     # su impianto solo elettrico — issue #6).
