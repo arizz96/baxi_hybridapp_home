@@ -153,12 +153,11 @@ class PDCHeatingSetpointTempSensor(BaxiBaseSensor):
         super().__init__(
             coordinator,
             api,
-            name="Setpoint Mandata PDC (Calcolato)",
+            translation_key="pdc_heating_setpoint",
             unique_id="baxi_pdc_heating_setpoint_temperature",
             value_key="pdc_heating_setpoint_temp",
             unit=UnitOfTemperature.CELSIUS,
             device_class=SensorDeviceClass.TEMPERATURE,
-            icon="mdi:target"
         )
 
 class SetpointInstantTempSensor(BaxiBaseSensor):
@@ -907,13 +906,14 @@ class ExpectedCOPSensor(_ExpectedCapacityMixin, BaxiBaseSensor):
         super().__init__(
             coordinator,
             api,
-            name="COP Atteso",
+            translation_key="expected_cop",
             unique_id="baxi_expected_cop",
             value_key="expected_cop",
             unit=None,
             device_class=None,
-            icon="mdi:sync-circle",
         )
+        # Calcolati dal setpoint mandata PDC: esistono solo se il modello lo pubblica.
+        self._source_attr = "pdc_heating_setpoint_temp"
         self._attr_suggested_display_precision = 2
 
     @property
@@ -927,13 +927,14 @@ class ExpectedThermalPowerSensor(_ExpectedCapacityMixin, BaxiBaseSensor):
         super().__init__(
             coordinator,
             api,
-            name="Potenza Termica Attesa (Pt)",
+            translation_key="expected_thermal_power",
             unique_id="baxi_expected_thermal_power",
             value_key="expected_thermal_power",
             unit=UnitOfPower.KILO_WATT,
             device_class=SensorDeviceClass.POWER,
-            icon="mdi:radiator",
         )
+        # Calcolati dal setpoint mandata PDC: esistono solo se il modello lo pubblica.
+        self._source_attr = "pdc_heating_setpoint_temp"
         self._attr_suggested_display_precision = 2
 
     @property
@@ -947,13 +948,14 @@ class ExpectedElectricPowerSensor(_ExpectedCapacityMixin, BaxiBaseSensor):
         super().__init__(
             coordinator,
             api,
-            name="Potenza Elettrica Attesa (Pel)",
+            translation_key="expected_electric_power",
             unique_id="baxi_expected_electric_power",
             value_key="expected_electric_power",
             unit=UnitOfPower.KILO_WATT,
             device_class=SensorDeviceClass.POWER,
-            icon="mdi:flash",
         )
+        # Calcolati dal setpoint mandata PDC: esistono solo se il modello lo pubblica.
+        self._source_attr = "pdc_heating_setpoint_temp"
         self._attr_suggested_display_precision = 2
 
     @property
