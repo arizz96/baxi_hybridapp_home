@@ -139,6 +139,7 @@
       "expected_cop": { "name": "COP atteso" },
       "expected_thermal_power": { "name": "Potenza termica attesa (Pt)" },
       "expected_electric_power": { "name": "Potenza elettrica attesa (Pel)" },
+      "expected_energy": { "name": "Energia elettrica stimata (cumulativa)" },
       "daily_time_heat_pump": { "name": "Tempo giornaliero PDC" },
       "daily_time_boiler": { "name": "Tempo giornaliero caldaia" },
       "daily_time_heating": { "name": "Tempo giornaliero riscaldamento" },
