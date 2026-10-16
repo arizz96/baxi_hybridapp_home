@@ -139,6 +139,7 @@
       "expected_cop": { "name": "Expected COP" },
       "expected_thermal_power": { "name": "Expected thermal power (Pt)" },
       "expected_electric_power": { "name": "Expected electric power (Pel)" },
+      "expected_energy": { "name": "Expected electric energy (cumulative)" },
       "daily_time_heat_pump": { "name": "Daily heat pump time" },
       "daily_time_boiler": { "name": "Daily boiler time" },
       "daily_time_heating": { "name": "Daily heating time" },

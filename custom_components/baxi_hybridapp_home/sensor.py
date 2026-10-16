@@ -6,13 +6,15 @@ custom_components/baxi_hybridapp_home/sensor.py
 
 from homeassistant.components.sensor import SensorEntity, SensorDeviceClass, SensorStateClass
 from homeassistant.const import (
-    PERCENTAGE, SIGNAL_STRENGTH_DECIBELS_MILLIWATT, UnitOfPower, UnitOfPressure, UnitOfTemperature, UnitOfTime,
+    PERCENTAGE, SIGNAL_STRENGTH_DECIBELS_MILLIWATT, UnitOfEnergy, UnitOfPower, UnitOfPressure, UnitOfTemperature, UnitOfTime,
 )
 from homeassistant.helpers.entity import EntityCategory
+from homeassistant.core import callback
+from homeassistant.helpers.restore_state import RestoreEntity
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from homeassistant.util import dt as dt_util
 from homeassistant.util import slugify
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from .device import async_add_provided_entities, build_device_info
 from .metrics import DAILY_MODE_TIME_METRICS, ENERGY_SENSOR_TYPES
 
@@ -973,6 +975,70 @@ class ExpectedElectricPowerSensor(_ExpectedCapacityMixin, BaxiBaseSensor):
         return round(val, 2) if val is not None else None
 
 
+class ExpectedEnergySensor(_ExpectedCapacityMixin, BaxiBaseSensor, RestoreEntity):
+    """Energia elettrica stimata assorbita dalla PDC, cumulativa (kWh).
+
+    Integrale nel tempo della potenza elettrica attesa (Pel, Capacity Tables),
+    come l'helper "Integrale di Riemann": a ogni aggiornamento del coordinator
+    si somma la media (trapezio) di Pel tra due letture × il tempo trascorso.
+    Pel non disponibile (PDC ferma) conta come 0 kW. Non si azzera mai
+    (TOTAL_INCREASING, utilizzabile nella dashboard Energia) e sopravvive ai
+    riavvii. Intervalli più lunghi di _MAX_GAP non vengono integrati (cloud
+    irraggiungibile / HA spento: Pel sconosciuto). Stima, non misura: la
+    risoluzione dipende dall'intervallo di polling e non include ausiliari né
+    resistenze.
+    """
+
+    _MAX_GAP = timedelta(minutes=15)
+
+    def __init__(self, coordinator, api):
+        super().__init__(
+            coordinator,
+            api,
+            translation_key="expected_energy",
+            unique_id="baxi_expected_energy",
+            value_key="expected_electric_power",
+            unit=UnitOfEnergy.KILO_WATT_HOUR,
+            device_class=SensorDeviceClass.ENERGY,
+        )
+        self._source_attr = "pdc_heating_setpoint_temp"
+        self._attr_state_class = SensorStateClass.TOTAL_INCREASING
+        self._attr_suggested_display_precision = 2
+        self._energy_kwh = 0.0
+        self._last_time = None
+        self._last_pel = 0.0
+
+    async def async_added_to_hass(self):
+        await super().async_added_to_hass()
+        last = await self.async_get_last_state()
+        if last is None:
+            return
+        try:
+            self._energy_kwh = float(last.state)
+        except (TypeError, ValueError):
+            pass  # unavailable/unknown: riparte da zero
+
+    @callback
+    def _handle_coordinator_update(self):
+        if self.coordinator.last_update_success:
+            now = dt_util.utcnow()
+            pel = getattr(self._api, "expected_electric_power", None) or 0.0
+            if self._last_time is not None and now - self._last_time <= self._MAX_GAP:
+                hours = (now - self._last_time).total_seconds() / 3600
+                self._energy_kwh += (self._last_pel + pel) / 2 * hours
+            self._last_time = now
+            self._last_pel = pel
+        super()._handle_coordinator_update()
+
+    @property
+    def available(self) -> bool:
+        return self.coordinator.last_update_success
+
+    @property
+    def native_value(self):
+        return round(self._energy_kwh, 3)
+
+
 # 🔒 Classe sensori energia
 class BaxiEnergySensor(BaxiBaseSensor):
     def __init__(self, coordinator, api, description):
@@ -1062,6 +1128,7 @@ async def async_setup_entry(hass, entry, async_add_entities):
         ExpectedCOPSensor(coordinator, api),
         ExpectedThermalPowerSensor(coordinator, api),
         ExpectedElectricPowerSensor(coordinator, api),
+        ExpectedEnergySensor(coordinator, api),
     ]
     # affianco i nuovi sensori energia
     sensors.extend(
