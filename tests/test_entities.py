@@ -81,3 +81,57 @@ def test_switch_target_prefers_staged_date(api, runtime):
     api.holiday_mode_end = datetime.now(timezone.utc) + timedelta(days=1)
     runtime.holiday_staged_end = staged
     assert entity(BaxiHolidayModeSwitch, runtime)._target_end() == staged
+
+
+# --- Prestazioni attese (Pt/Pel/COP) --------------------------------------------
+
+
+def _expected_api(api, status_pdc):
+    from custom_components.baxi_hybridapp_home.capacity_tables import CAPACITY_MODELS
+
+    api.thingModel = CAPACITY_MODELS[0].aliases[0]
+    api.temp_ext = 7.0
+    api.pdc_heating_setpoint_temp = 35.0
+    api.status_pdc = status_pdc
+    return api
+
+
+def test_expected_sensors_running(api, coordinator):
+    from custom_components.baxi_hybridapp_home.sensor import (
+        ExpectedCOPSensor, ExpectedElectricPowerSensor, ExpectedThermalPowerSensor,
+    )
+
+    _expected_api(api, "0001")
+    for cls in (ExpectedCOPSensor, ExpectedElectricPowerSensor, ExpectedThermalPowerSensor):
+        sensor = cls(coordinator, api)
+        assert sensor.available
+        assert sensor.native_value > 0
+
+
+@pytest.mark.parametrize("setpoint", [35.0, 10.0])  # PDC ferma / placeholder sotto min_flow_temp
+def test_expected_sensors_idle_power_zero_cop_unknown(api, coordinator, setpoint):
+    from custom_components.baxi_hybridapp_home.sensor import (
+        ExpectedCOPSensor, ExpectedElectricPowerSensor, ExpectedThermalPowerSensor,
+    )
+
+    _expected_api(api, "0000" if setpoint == 35.0 else "0001")
+    api.pdc_heating_setpoint_temp = setpoint
+    for cls in (ExpectedElectricPowerSensor, ExpectedThermalPowerSensor):
+        sensor = cls(coordinator, api)
+        assert sensor.available
+        assert sensor.native_value == 0.0
+    cop = ExpectedCOPSensor(coordinator, api)
+    assert cop.available
+    assert cop.native_value is None
+
+
+def test_expected_sensors_unavailable_when_not_computable(api, coordinator):
+    from custom_components.baxi_hybridapp_home.sensor import ExpectedElectricPowerSensor
+
+    _expected_api(api, "0000")
+    sensor = ExpectedElectricPowerSensor(coordinator, api)
+    api.thingModel = "modello-sconosciuto"
+    assert not sensor.available
+    _expected_api(api, "0000")
+    api.temp_ext = None
+    assert not sensor.available

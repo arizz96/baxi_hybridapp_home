@@ -148,7 +148,7 @@ class PDCHeatingSetpointTempSensor(BaxiBaseSensor):
     # stesso valore sia in produzione sanitaria che in riscaldamento a
     # pavimento (il firmware unifica da solo la richiesta attiva). Usato
     # come input per i sensori "attesi" (COP/Pt/Pel), vedi
-    # api._expected_capacity_point.
+    # api._expected_capacity.
     def __init__(self, coordinator, api):
         super().__init__(
             coordinator,
@@ -874,7 +874,7 @@ class FailureCount7dSensor(BaxiBaseSensor):
 
 # 📊 Prestazioni attese (Capacity Tables Baxi): COP, Pt, Pel interpolati da
 # temperatura esterna + target di mandata PDC, vedi
-# api._expected_capacity_point. Il target ("Set point mandata PDC caldo
+# api._expected_capacity. Il target ("Set point mandata PDC caldo
 # (calcolato)") è calcolato dal firmware ed è già lo stesso valore sia in
 # produzione sanitaria che in riscaldamento a pavimento — nessuna logica
 # aggiuntiva qui per distinguere le due utenze. Nessun fallback su letture
@@ -883,13 +883,22 @@ class FailureCount7dSensor(BaxiBaseSensor):
 # valore che potrebbe essere residuo/non significativo a PDC ferma.
 # A PDC idle il calcolato può riportare un placeholder ben sotto le
 # mandate reali (osservato: 10°C con 30°C esterni, nessuna richiesta
-# attiva): api._expected_capacity_point richiede status_pdc diverso da
+# attiva): api._expected_capacity richiede status_pdc diverso da
 # "0000" (o, in fallback, power_pdc > 0) quando disponibile, e scarta
-# comunque i valori sotto min_flow_temp() della tabella del modello —
-# sensori unavailable in tutti questi casi.
-# Unavailable finché il modello (thingModel) non è censito in capacity_tables.py.
+# comunque i valori sotto min_flow_temp() della tabella del modello — in
+# tutti questi casi (PDC ferma) Pt/Pel valgono 0 e il COP è unknown, ma i
+# sensori restano disponibili: così le statistiche a lungo termine non
+# "uniscono i punti" attraverso buchi di unavailable.
+# Unavailable (non calcolabile) finché il modello (thingModel) non è censito in capacity_tables.py.
 class _ExpectedCapacityMixin:
     """extra_state_attributes comune: quali letture hanno prodotto il valore."""
+
+    @property
+    def available(self) -> bool:
+        # A PDC ferma il valore può essere 0/None ma il sensore resta
+        # disponibile; unavailable solo se non calcolabile (cloud
+        # irraggiungibile, temperature o modello mancanti).
+        return self.coordinator.last_update_success and self._api.expected_capacity_computable
 
     @property
     def extra_state_attributes(self):

@@ -25,6 +25,9 @@ from .capacity_tables import find_capacity_model, interpolate, min_flow_temp
 
 _LOGGER = logging.getLogger(__name__)
 
+# Marcatore "PDC ferma" per le prestazioni attese (vedi _expected_capacity).
+_CAPACITY_IDLE = object()
+
 # metricName dello scheduler sanitario (parsing proprio, fuori dalle tabelle di metrics.py).
 SANITARY_SCHEDULER_METRIC = "Schedulatore - Sanitario"
 # Tutte le metriche lette a ogni ciclo: semplici, scheduler sanitario, energia
@@ -1448,9 +1451,10 @@ class BaxiHybridAppAPI:
     # necessaria qui per distinguerle).
     # Niente fallback su pdc_exit_temp: è una lettura, non un target, e può
     # restare "in eredità" a un valore residuo quando la PDC è ferma (stesso
-    # problema che aveva boiler_flow_temp) — meglio unavailable che un
+    # problema che aveva boiler_flow_temp) — meglio non stimare che un
     # numero plausibile ma non significativo. Se il modello/firmware non
-    # pubblica il calcolato, i tre sensori restano semplicemente unavailable.
+    # pubblica il calcolato (o il modello non è censito) i tre sensori
+    # restano unavailable.
     #
     # A PDC ferma (idle, nessuna richiesta attiva né sanitario né
     # riscaldamento) il "calcolato" può riportare un placeholder ben sotto
@@ -1469,33 +1473,50 @@ class BaxiHybridAppAPI:
     # affidabile — trattiamo un valore inferiore come "nessuna richiesta di
     # calore in corso" invece di clampare al bordo della tabella e
     # mostrare un numero plausibile ma senza significato.
-    def _expected_capacity_point(self):
+    #
+    # PDC ferma ≠ non calcolabile: a PDC ferma Pt/Pel valgono 0 (così le
+    # statistiche a lungo termine non "uniscono i punti" attraverso i buchi
+    # di unavailable), il COP è invece indefinito (0/0) → unknown ma sensore
+    # disponibile. Non calcolabile (temperature o modello mancanti) →
+    # unavailable.
+    def _expected_capacity(self):
+        """None se non calcolabile, _CAPACITY_IDLE a PDC ferma, altrimenti il punto interpolato."""
         if self.temp_ext is None or self.pdc_heating_setpoint_temp is None:
-            return None
-        if self.status_pdc is not None:
-            if self.status_pdc == "0000":
-                return None
-        elif self.power_pdc is not None and self.power_pdc <= 0:
             return None
         model = find_capacity_model(self.thingModel, self.thingDefinitionName)
         if model is None:
             return None
+        if self.status_pdc is not None:
+            if self.status_pdc == "0000":
+                return _CAPACITY_IDLE
+        elif self.power_pdc is not None and self.power_pdc <= 0:
+            return _CAPACITY_IDLE
         if self.pdc_heating_setpoint_temp < min_flow_temp(model.heating):
-            return None
+            return _CAPACITY_IDLE
         return interpolate(model.heating, self.temp_ext, self.pdc_heating_setpoint_temp)
 
     @property
+    def expected_capacity_computable(self):
+        return self._expected_capacity() is not None
+
+    @property
     def expected_thermal_power(self):
-        point = self._expected_capacity_point()
-        return point.pt if point else None
+        point = self._expected_capacity()
+        if point is None:
+            return None
+        return 0.0 if point is _CAPACITY_IDLE else point.pt
 
     @property
     def expected_electric_power(self):
-        point = self._expected_capacity_point()
-        return point.pel if point else None
+        point = self._expected_capacity()
+        if point is None:
+            return None
+        return 0.0 if point is _CAPACITY_IDLE else point.pel
 
     @property
     def expected_cop(self):
-        point = self._expected_capacity_point()
-        return point.cop if point else None
+        point = self._expected_capacity()
+        if point is None or point is _CAPACITY_IDLE:
+            return None
+        return point.cop
 
