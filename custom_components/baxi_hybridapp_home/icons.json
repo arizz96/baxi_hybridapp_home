@@ -52,6 +52,7 @@
       "expected_cop": { "default": "mdi:sync-circle" },
       "expected_thermal_power": { "default": "mdi:radiator" },
       "expected_electric_power": { "default": "mdi:flash" },
+      "expected_energy": { "default": "mdi:flash-triangle" },
       "daily_time_heat_pump": { "default": "mdi:heat-pump" },
       "daily_time_boiler": { "default": "mdi:water-boiler" },
       "daily_time_heating": { "default": "mdi:radiator" },
