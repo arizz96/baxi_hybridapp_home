@@ -80,7 +80,8 @@
     "button": {
       "update_data": { "name": "Aggiorna" },
       "test_failure": { "name": "Test Failure" },
-      "boost": { "name": "Boost Sanitario" }
+      "boost": { "name": "Boost Sanitario" },
+      "comfort_now": { "name": "Comfort Sanitario ora" }
     },
     "datetime": {
       "holiday_mode_end": { "name": "Modo Vacanza Fine" }
@@ -195,6 +196,9 @@
     },
     "boost_failed": {
       "message": "Avvio del boost sanitario non riuscito: il cloud Baxi non ha accettato il comando."
+    },
+    "comfort_now_failed": {
+      "message": "Programmazione della fascia Comfort non riuscita: il cloud Baxi non ha accettato la scrittura."
     },
     "boost_duration_failed": {
       "message": "Impostazione della durata del boost sanitario a {value} min non riuscita: il cloud Baxi non ha accettato la richiesta."

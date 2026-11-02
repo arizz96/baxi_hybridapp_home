@@ -80,7 +80,8 @@
     "button": {
       "update_data": { "name": "Refresh" },
       "test_failure": { "name": "Test failure" },
-      "boost": { "name": "DHW boost" }
+      "boost": { "name": "DHW boost" },
+      "comfort_now": { "name": "DHW Comfort now" }
     },
     "datetime": {
       "holiday_mode_end": { "name": "Holiday mode end" }
@@ -195,6 +196,9 @@
     },
     "boost_failed": {
       "message": "Starting the DHW boost failed: the Baxi cloud did not accept the command."
+    },
+    "comfort_now_failed": {
+      "message": "Scheduling the Comfort slot failed: the Baxi cloud did not accept the write."
     },
     "boost_duration_failed": {
       "message": "Setting the DHW boost duration to {value} min failed: the Baxi cloud did not accept the request."
