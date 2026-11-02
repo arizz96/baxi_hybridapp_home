@@ -1230,6 +1230,46 @@ class BaxiHybridAppAPI:
         payload = self.build_sanitary_schedule_payload(day_key, slots)
         return self.set_configuration_parameter(PARAM_ID_SANITARY_SCHEDULER, payload)
 
+    @staticmethod
+    def comfort_now_range(now: datetime) -> tuple[datetime, datetime]:
+        """
+        Fascia "Comfort adesso": dalla mezz'ora precedente (arrotondata per difetto) a
+        now + 30 min arrotondato al mezz'ora più vicino, di almeno 60 minuti.
+        """
+        grid = SANITARY_SCHEDULE_GRID_MINUTES
+        start = now.replace(minute=now.minute // grid * grid, second=0, microsecond=0)
+        target = now + timedelta(minutes=grid)
+        minutes = (target - start).total_seconds() / 60
+        end = start + timedelta(minutes=round(minutes / grid) * grid)
+        return start, max(end, start + timedelta(minutes=SANITARY_SCHEDULE_MIN_DURATION_MINUTES))
+
+    def schedule_comfort_now(self, now: datetime) -> bool:
+        """
+        Programma subito una fascia Comfort (vedi comfort_now_range). Se si
+        sovrappone o tocca fasce già presenti nel giorno, le estende (unione)
+        invece di crearne una nuova.
+        """
+        start, end = self.comfort_now_range(now)
+        if end.date() != start.date():
+            raise ValueError(
+                "La fascia Comfort non può superare la mezzanotte: riprova dopo le 00:00"
+            )
+        day_key = SANITARY_SCHEDULE_DAY_KEYS[start.weekday()]
+        new_start, new_end = start.strftime("%H:%M"), end.strftime("%H:%M")
+
+        self.fetch_sanitary_scheduler()
+        slots = []
+        for slot in self._get_day_comfort_slots(day_key):
+            # HH:MM zero-padded: il confronto tra stringhe equivale a quello orario.
+            if slot["start"] <= new_end and slot["end"] >= new_start:
+                new_start = min(new_start, slot["start"])
+                new_end = max(new_end, slot["end"])
+            else:
+                slots.append(slot)
+        slots.append({"start": new_start, "end": new_end})
+        payload = self.build_sanitary_schedule_payload(day_key, slots)
+        return self.set_configuration_parameter(PARAM_ID_SANITARY_SCHEDULER, payload)
+
     def delete_sanitary_comfort_slot(self, day_key: str, index: int) -> bool:
         """Rimuove una fascia Comfort di un giorno (quella fascia torna Eco) e scrive."""
         if day_key not in SANITARY_SCHEDULE_DAY_KEYS:

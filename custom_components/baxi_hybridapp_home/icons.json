@@ -13,7 +13,8 @@
     "button": {
       "update_data": { "default": "mdi:update" },
       "test_failure": { "default": "mdi:test-tube" },
-      "boost": { "default": "mdi:rocket-launch" }
+      "boost": { "default": "mdi:rocket-launch" },
+      "comfort_now": { "default": "mdi:water-boiler-alert" }
     },
     "datetime": {
       "holiday_mode_end": { "default": "mdi:calendar-end" }
