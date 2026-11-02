@@ -88,6 +88,52 @@ class BaxiBoostButton(ButtonEntity):
         return build_device_info(self._api)
 
 
+class BaxiComfortNowButton(ButtonEntity):
+    """Programma subito una fascia Comfort nello scheduler sanitario.
+
+    Stessa fascia di un evento del calendario "Schedulatore Sanitario": da
+    mezz'ora precedente a now + 30 min (arrotondato a 30 min), minimo 1 h.
+    Se si sovrappone a fasce esistenti, le estende.
+    """
+
+    _attr_has_entity_name = True
+    _attr_translation_key = "comfort_now"
+    _attr_unique_id = "baxi_comfort_now_button"
+
+    def __init__(self, coordinator, api):
+        self._coordinator = coordinator
+        self._api = api
+
+    @property
+    def available(self) -> bool:
+        return getattr(self._api, "sanitary_scheduler_status", None) == "ok"
+
+    async def async_press(self):
+        now = dt_util.now()
+        try:
+            ok = await self.hass.async_add_executor_job(self._api.schedule_comfort_now, now)
+        except ValueError as err:
+            raise HomeAssistantError(str(err)) from err
+        if not ok:
+            raise HomeAssistantError(
+                translation_domain=DOMAIN, translation_key="comfort_now_failed"
+            )
+        await self.hass.services.async_call(
+            "logbook", "log",
+            {"name": "Comfort sanitario", "message": "fascia programmata ora", "entity_id": self.entity_id},
+            blocking=False,
+        )
+        self.hass.async_create_task(self._grace_refresh())
+
+    async def _grace_refresh(self) -> None:
+        await asyncio.sleep(WRITE_GRACE_SECONDS)
+        await self._coordinator.async_request_refresh()
+
+    @property
+    def device_info(self):
+        return build_device_info(self._api)
+
+
 class BaxiTestFailureButton(ButtonEntity):
     """
     Pulsante diagnostico che inietta alert simulati (FAILURE + WARNING) sui due
@@ -194,7 +240,8 @@ async def async_setup_entry(hass, entry, async_add_entities):
     api = entry.runtime_data.api
     coordinator = entry.runtime_data.coordinator
 
-    buttons = [BaxiUpdateButton(coordinator, api), BaxiBoostButton(coordinator, api)]
+    buttons = [BaxiUpdateButton(coordinator, api), BaxiBoostButton(coordinator, api),
+               BaxiComfortNowButton(coordinator, api)]
     if _LOGGER.isEnabledFor(logging.DEBUG):
         buttons.append(BaxiTestFailureButton(coordinator, api))
         _LOGGER.debug("🧪 DEBUG attivo: esposto pulsante Test Failure")
