@@ -21,7 +21,7 @@ from .const import (
     SANITARY_SCHEDULE_MIN_DURATION_MINUTES,
 )
 from .metrics import SIMPLE_METRICS, SimpleMetricSpec, ENERGY_SENSOR_TYPES, _parse_float
-from .capacity_tables import find_capacity_model, interpolate, min_flow_temp
+from .capacity_tables import find_capacity_model, lookup, min_flow_temp
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -1533,7 +1533,8 @@ class BaxiHybridAppAPI:
             return _CAPACITY_IDLE
         if self.pdc_heating_setpoint_temp < min_flow_temp(model.heating):
             return _CAPACITY_IDLE
-        return interpolate(model.heating, self.temp_ext, self.pdc_heating_setpoint_temp)
+        result = lookup(model.heating, self.temp_ext, self.pdc_heating_setpoint_temp)
+        return result.point if result else None
 
     @property
     def expected_capacity_computable(self):

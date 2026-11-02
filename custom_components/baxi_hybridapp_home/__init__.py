@@ -18,7 +18,7 @@ from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers import entity_registry as er
 
 from .api import BaxiHybridAppAPI
-from .capacity_tables import find_capacity_model, interpolate, is_clamped
+from .capacity_tables import find_capacity_model, lookup
 from .const import (
     DOMAIN,
     PARAM_ID_SETPOINT_COMFORT, PARAM_ID_SETPOINT_ECO,
@@ -178,12 +178,13 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
                 translation_domain=DOMAIN, translation_key="capacity_model_unsupported",
             )
         t_ext, t_flow = call.data["t_ext"], call.data["t_flow"]
-        point = interpolate(model.heating, t_ext, t_flow)
+        result = lookup(model.heating, t_ext, t_flow)
+        point = result.point
         return {
             "pel_kw": round(point.pel, 2),
             "pt_kw": round(point.pt, 2),
             "cop": round(point.cop, 2),
-            "clamped": is_clamped(model.heating, t_ext, t_flow),
+            "clamped": result.clamped,
             "model": model.aliases[0],
         }
 
