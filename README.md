@@ -210,6 +210,7 @@ Use an entity that is enabled (not, for example, an energy sensor disabled by de
 |---|---|
 | `baxi_hybridapp_home.set_comfort` | Sets the DHW **Comfort** setpoint (`value`: 30–52 °C) |
 | `baxi_hybridapp_home.set_eco` | Sets the DHW **Eco** setpoint (`value`: 30–52 °C) |
+| `baxi_hybridapp_home.expected_performance` | Returns Capacity Tables `pel_kw`, `pt_kw`, `cop` (plus `clamped`, `model`) for a hypothetical `t_ext` (-40–50 °C) / `t_flow` (20–70 °C); response-only, no cloud call |
 
 ```yaml
 action: baxi_hybridapp_home.set_comfort

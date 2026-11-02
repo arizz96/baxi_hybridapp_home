@@ -103,6 +103,17 @@ def min_flow_temp(table: CapacityTable) -> float:
     return min(flow for cols in table.values() for flow in cols)
 
 
+def is_clamped(table: CapacityTable, ext_temp: float, flow_temp: float) -> bool:
+    """True se (temp. esterna, mandata) cade fuori dai limiti pubblicati nella tabella."""
+    if not table:
+        return False
+    flows = [flow for cols in table.values() for flow in cols]
+    return not (
+        min(table) <= ext_temp <= max(table)
+        and min(flows) <= flow_temp <= max(flows)
+    )
+
+
 def _normalize(value: str | None) -> str:
     return "".join(str(value or "").upper().split())
 

@@ -199,6 +199,9 @@
     "comfort_now_failed": {
       "message": "Programmazione della fascia Comfort non riuscita: il cloud Baxi non ha accettato la scrittura."
     },
+    "capacity_model_unsupported": {
+      "message": "Il modello di pompa di calore non ha Capacity Tables censite."
+    },
     "boost_duration_failed": {
       "message": "Impostazione della durata del boost sanitario a {value} min non riuscita: il cloud Baxi non ha accettato la richiesta."
     }
@@ -246,6 +249,14 @@
           "name": "Setpoint Eco",
           "description": "Temperatura Eco (°C) fuori dalle fasce Comfort di questo giorno. Se omesso resta invariato."
         }
+      }
+    },
+    "expected_performance": {
+      "name": "Prestazioni attese",
+      "description": "Restituisce Pel, Pt e COP delle Capacity Tables per una coppia ipotetica di temperatura esterna e di mandata (utile per pianificare in base alle previsioni meteo). Non legge lo stato dell'impianto.",
+      "fields": {
+        "t_ext": { "name": "Temperatura esterna", "description": "Temperatura esterna, anche prevista (-40–50 °C)." },
+        "t_flow": { "name": "Temperatura di mandata", "description": "Temperatura di mandata target della pompa di calore (20–70 °C)." }
       }
     }
   }

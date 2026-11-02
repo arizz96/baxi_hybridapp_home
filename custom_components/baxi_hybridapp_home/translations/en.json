@@ -199,6 +199,9 @@
     "comfort_now_failed": {
       "message": "Scheduling the Comfort slot failed: the Baxi cloud did not accept the write."
     },
+    "capacity_model_unsupported": {
+      "message": "This heat pump model has no Capacity Tables."
+    },
     "boost_duration_failed": {
       "message": "Setting the DHW boost duration to {value} min failed: the Baxi cloud did not accept the request."
     }
@@ -237,6 +240,14 @@
         "day": { "name": "Day", "description": "Day of the week to update." },
         "slots": { "name": "Comfort slots", "description": "List of the day's Comfort slots, e.g. [{start: \"07:00\", end: \"09:00\"}]." },
         "eco_setpoint": { "name": "Eco setpoint", "description": "Eco temperature (°C) outside this day's Comfort slots. Left unchanged if omitted." }
+      }
+    },
+    "expected_performance": {
+      "name": "Expected performance",
+      "description": "Returns the Capacity Tables Pel, Pt and COP for a hypothetical outdoor and flow temperature pair (useful to plan from the weather forecast). Does not read the plant state.",
+      "fields": {
+        "t_ext": { "name": "Outdoor temperature", "description": "Outdoor temperature, forecast values allowed (-40–50 °C)." },
+        "t_flow": { "name": "Flow temperature", "description": "Target heat pump flow temperature (20–70 °C)." }
       }
     }
   }

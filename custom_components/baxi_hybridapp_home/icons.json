@@ -68,6 +68,7 @@
   },
   "services": {
     "set_comfort": { "service": "mdi:water-boiler" },
-    "set_eco": { "service": "mdi:leaf" }
+    "set_eco": { "service": "mdi:leaf" },
+    "expected_performance": { "service": "mdi:chart-line" }
   }
 }
