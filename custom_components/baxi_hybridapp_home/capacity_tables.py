@@ -22,6 +22,7 @@ custom_components/baxi_hybridapp_home/capacity_tables.py
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 
 # {temp_mandata: (Pt, Pel, COP)} per una riga a temperatura esterna fissa.
@@ -156,7 +157,7 @@ def _lerp(x: float, x0: float, x1: float, y0: float, y1: float) -> float:
 
 
 def _nearest_point(table: CapacityTable, ext_temp: float, flow_temp: float) -> CapacityPoint | None:
-    """Punto valido più vicino nella tabella (fallback per celle mancanti)."""
+    """Punto valido più vicino nella tabella (ultima risorsa se non c'è nulla da adattare)."""
     best: CapacityPoint | None = None
     best_dist: float | None = None
     for ext, cols in table.items():
@@ -168,16 +169,166 @@ def _nearest_point(table: CapacityTable, ext_temp: float, flow_temp: float) -> C
     return best
 
 
+# --- Superficie liscia per le celle mancanti -------------------------------
+#
+# Le celle "/" della tabella sono tutte oltre il limite di mandata della
+# macchina a quella temperatura esterna (es. a -25 °C la tabella arriva a
+# 45 °C). Ripiegare sul punto più vicino le fa valere come la cella
+# adiacente, il che sovrastima (a -25/60 darebbe COP 1.29 contro ~1.0
+# atteso). Il COP ha una forma esponenziale nelle due temperature
+# (≈ -2.5 %/K di mandata, ≈ +3 %/K di temperatura esterna): ln(COP) è ben
+# descritto da un polinomio di 2° grado (errore ~4 % in cross-validation,
+# contro ~20 % di un fit lineare sul COP). Lo stesso vale, meno bene, per
+# Pt e Pel.
+
+_FIT_MIN_SAMPLES = 12
+_FIT_OUTLIER_LN = 0.30  # scarto in ln(valore) oltre cui un punto non entra nel fit
+_FIT_TERMS = 6
+_MIN_COP = 1.0  # sotto 1 non è fisico: al peggio la resistenza elettrica rende COP 1
+
+
+def _basis(ext_temp: float, flow_temp: float) -> tuple[float, ...]:
+    x, y = ext_temp / 20.0, flow_temp / 40.0  # scalati: normal equations ben condizionate
+    return (1.0, y, y * y, x, x * y, x * x)
+
+
+def _solve(matrix: list[list[float]], rhs: list[float]) -> list[float] | None:
+    """Gauss con pivoting parziale; None se il sistema è singolare."""
+    n = len(rhs)
+    aug = [row[:] + [rhs[i]] for i, row in enumerate(matrix)]
+    for col in range(n):
+        pivot = max(range(col, n), key=lambda r: abs(aug[r][col]))
+        if abs(aug[pivot][col]) < 1e-12:
+            return None
+        aug[col], aug[pivot] = aug[pivot], aug[col]
+        for r in range(col + 1, n):
+            factor = aug[r][col] / aug[col][col]
+            for c in range(col, n + 1):
+                aug[r][c] -= factor * aug[col][c]
+    sol = [0.0] * n
+    for r in range(n - 1, -1, -1):
+        sol[r] = (aug[r][n] - sum(aug[r][c] * sol[c] for c in range(r + 1, n))) / aug[r][r]
+    return sol
+
+
+def _least_squares(samples: list[tuple[float, float, float]]) -> tuple[float, ...] | None:
+    ata = [[0.0] * _FIT_TERMS for _ in range(_FIT_TERMS)]
+    atb = [0.0] * _FIT_TERMS
+    for ext, flow, target in samples:
+        row = _basis(ext, flow)
+        for i in range(_FIT_TERMS):
+            atb[i] += row[i] * target
+            for j in range(_FIT_TERMS):
+                ata[i][j] += row[i] * row[j]
+    sol = _solve(ata, atb)
+    return tuple(sol) if sol is not None else None
+
+
+@dataclass(frozen=True)
+class Surface:
+    """valore(ext, mandata) = exp(polinomio di 2° grado): sempre positivo, liscio, estrapolabile."""
+    coeffs: tuple[float, ...]
+
+    def __call__(self, ext_temp: float, flow_temp: float) -> float:
+        return math.exp(sum(c * b for c, b in zip(self.coeffs, _basis(ext_temp, flow_temp))))
+
+
+def fit_surface(table: CapacityTable, field: str = "cop") -> Surface | None:
+    """Adatta Surface al campo `field` ("cop"/"pt"/"pel") di tutte le celle pubblicate.
+
+    Due passate: la prima su tutti i punti, la seconda scartando quelli che
+    si discostano molto dalla prima (es. le celle a 65 °C con 5-7 °C esterni,
+    dove la macchina è al limite e il COP crolla a ~1.2-1.4: sono un
+    precipizio, non la tendenza). Nessun punto viene scartato "a mano".
+    """
+    samples = [
+        (ext, flow, math.log(value))
+        for ext, cols in table.items()
+        for flow, point in cols.items()
+        if (value := getattr(point, field)) > 0
+    ]
+    if len(samples) < _FIT_MIN_SAMPLES:
+        return None
+    coeffs = _least_squares(samples)
+    if coeffs is None:
+        return None
+    surface = Surface(coeffs)
+    kept = [s for s in samples if abs(s[2] - math.log(surface(s[0], s[1]))) <= _FIT_OUTLIER_LN]
+    if _FIT_MIN_SAMPLES <= len(kept) < len(samples):
+        refit = _least_squares(kept)
+        if refit is not None:
+            surface = Surface(refit)
+    return surface
+
+
+def estimate_cop(table: CapacityTable, ext_temp: float, flow_temp: float) -> float | None:
+    """COP "realistico" per una coppia qualsiasi, anche fuori dalle celle pubblicate.
+
+    Valore della superficie liscia, senza correzione locale: serve per capire
+    la tendenza, mentre `lookup` resta il punto di ingresso per i sensori
+    (esatto sulle celle pubblicate, interpolato tra esse).
+    """
+    surface = fit_surface(table, "cop")
+    return max(surface(ext_temp, flow_temp), _MIN_COP) if surface is not None else None
+
+
+def _fill_gaps(table: CapacityTable) -> CapacityTable:
+    """Tabella completa su tutta la griglia ext × mandata.
+
+    Le celle pubblicate restano invariate. Ogni cella mancante vale la
+    superficie liscia moltiplicata per il rapporto (pubblicato / superficie)
+    della cella pubblicata più vicina nella stessa riga: così il valore si
+    raccorda con la tabella invece di fare un salto al confine. Pel è
+    derivata (Pt / COP) per restare coerente con la definizione di COP.
+    """
+    flows = sorted({flow for cols in table.values() for flow in cols})
+    if all(len(cols) == len(flows) for cols in table.values()):
+        return table
+    cop_s, pt_s = fit_surface(table, "cop"), fit_surface(table, "pt")
+    if cop_s is None or pt_s is None:
+        return table
+
+    filled: CapacityTable = {}
+    for ext, cols in table.items():
+        row = dict(cols)
+        for flow in flows:
+            if flow in cols:
+                continue
+            ref_flow = min(cols, key=lambda f: abs(f - flow))
+            ref = cols[ref_flow]
+            cop = max(cop_s(ext, flow) * ref.cop / cop_s(ext, ref_flow), _MIN_COP)
+            pt = pt_s(ext, flow) * ref.pt / pt_s(ext, ref_flow)
+            row[flow] = CapacityPoint(pt=pt, pel=pt / cop, cop=cop)
+        filled[ext] = row
+    return filled
+
+
+# {id(tabella): (tabella, tabella completata)}: le tabelle sono costanti di
+# modulo; si tiene il riferimento per evitare riuso di id.
+_FILLED_CACHE: dict[int, tuple[CapacityTable, CapacityTable]] = {}
+
+
+def _complete(table: CapacityTable) -> CapacityTable:
+    cached = _FILLED_CACHE.get(id(table))
+    if cached is None or cached[0] is not table:
+        cached = (table, _fill_gaps(table))
+        _FILLED_CACHE[id(table)] = cached
+    return cached[1]
+
+
 def interpolate(table: CapacityTable, ext_temp: float, flow_temp: float) -> CapacityPoint | None:
     """Interpola Pt/Pel/COP sulla griglia (temp. esterna, temp. mandata).
 
-    Interpolazione bilineare standard; le richieste fuori dai limiti
+    Interpolazione bilineare standard (temperature intermedie, es. 52 °C tra
+    50 e 55, sono interpolate e non troncate); le richieste fuori dai limiti
     pubblicati vengono clampate al bordo della tabella. Le celle mancanti
     (combinazioni non testate/non applicabili nella tabella originale)
-    ripiegano sul punto valido più vicino, invece di propagare un buco.
+    sono prima riempite con la superficie liscia (vedi `_fill_gaps`),
+    invece di propagare un buco o copiare la cella adiacente.
     """
     if not table:
         return None
+    table = _complete(table)
 
     ext_keys = sorted(table.keys())
     e0, e1 = _bracket(ext_keys, ext_temp)

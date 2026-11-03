@@ -11,7 +11,7 @@ from homeassistant.exceptions import ServiceValidationError
 
 from custom_components.baxi_hybridapp_home import async_setup
 from custom_components.baxi_hybridapp_home.capacity_tables import (
-    CAPACITY_MODELS, find_capacity_model, is_clamped,
+    CAPACITY_MODELS, estimate_cop, find_capacity_model, fit_surface, interpolate, is_clamped,
 )
 from custom_components.baxi_hybridapp_home.coordinator import BaxiRuntimeData
 
@@ -61,9 +61,13 @@ def test_interpolated_point(hass):
 
 
 def test_out_of_table_is_clamped_to_edge(hass):
+    # Fuori tabella: clamp all'angolo (-25, 65) della griglia, che in tabella è
+    # una cella mancante e quindi stimata (non pubblicata).
     res = call(hass, t_ext=-30, t_flow=70)
-    edge = TABLE[-25][max(TABLE[-25])]
-    assert (res["pt_kw"], res["pel_kw"], res["cop"]) == (edge.pt, edge.pel, edge.cop)
+    corner = interpolate(TABLE, -25, 65)
+    assert (res["pt_kw"], res["pel_kw"], res["cop"]) == (
+        round(corner.pt, 2), round(corner.pel, 2), round(corner.cop, 2),
+    )
     assert res["clamped"] is True
 
 
@@ -71,6 +75,51 @@ def test_missing_cell_falls_back_without_error(hass):
     # (-25, 50) non esiste in tabella: nessuna eccezione.
     res = call(hass, t_ext=-25, t_flow=50)
     assert res["pel_kw"] > 0 and res["clamped"] is False
+
+
+def test_in_between_flow_is_interpolated_not_floored():
+    lo, hi, mid = interpolate(TABLE, 15, 50), interpolate(TABLE, 15, 55), interpolate(TABLE, 15, 52)
+    assert hi.cop < mid.cop < lo.cop
+    assert mid.cop == pytest.approx(lo.cop + (hi.cop - lo.cop) * 0.4)
+
+
+def test_missing_cell_is_estimated_not_copied_from_neighbour():
+    # (-25, 50) e (-25, 60) mancano: prima valevano come (-25, 45) = 1.29.
+    published = TABLE[-25][45].cop
+    c50, c60 = interpolate(TABLE, -25, 50).cop, interpolate(TABLE, -25, 60).cop
+    assert 1.0 <= c60 < c50 < published
+
+
+def test_published_cells_are_untouched_by_gap_filling():
+    for ext, cols in TABLE.items():
+        for flow, point in cols.items():
+            got = interpolate(TABLE, ext, flow)
+            assert (got.pt, got.pel, got.cop) == pytest.approx((point.pt, point.pel, point.cop))
+
+
+def test_smooth_cop_surface_shape():
+    # COP scende con la mandata e sale con la temperatura esterna, ovunque.
+    for ext in range(-25, 44, 6):
+        values = [estimate_cop(TABLE, ext, flow) for flow in range(25, 66, 5)]
+        assert values == sorted(values, reverse=True)
+    for flow in range(25, 66, 10):
+        values = [estimate_cop(TABLE, ext, flow) for ext in range(-25, 44, 6)]
+        assert values == sorted(values)
+
+
+def test_smooth_cop_tracks_table_within_tolerance():
+    # Esclude le due celle a 65 °C (precipizio, scartate dal fit come outlier).
+    errors = [
+        abs(estimate_cop(TABLE, ext, flow) - p.cop) / p.cop
+        for ext, cols in TABLE.items() for flow, p in cols.items() if not (flow == 65 and ext < 10)
+    ]
+    assert sum(errors) / len(errors) < 0.06
+
+
+def test_estimate_never_below_one_and_fit_needs_enough_data():
+    assert estimate_cop(TABLE, -40, 70) >= 1.0
+    assert fit_surface({0: {35: CAPACITY_MODELS[0].heating[0][35]}}) is None
+    assert estimate_cop({}, 0, 35) is None
 
 
 def test_unsupported_model(api):
