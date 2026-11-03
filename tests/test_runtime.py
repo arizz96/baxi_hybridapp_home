@@ -24,8 +24,10 @@ class FakeHass:
     async def async_add_executor_job(self, func, *args):
         return func(*args)
 
-    def _register(self, domain, service, handler, schema=None):
+    def _register(self, domain, service, handler, schema=None, supports_response=None):
         self.handlers[service] = handler
+        self.schemas = getattr(self, "schemas", {})
+        self.schemas[service] = (schema, supports_response)
 
     async def _call(self, domain, service, data, blocking=False):
         self.logbook.append(data)

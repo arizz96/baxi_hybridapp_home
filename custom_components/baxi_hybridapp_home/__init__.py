@@ -12,12 +12,13 @@ import logging
 import voluptuous as vol
 
 from homeassistant.config_entries import ConfigEntryState
-from homeassistant.core import HomeAssistant, ServiceCall
+from homeassistant.core import HomeAssistant, ServiceCall, ServiceResponse, SupportsResponse
 from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers import entity_registry as er
 
 from .api import BaxiHybridAppAPI
+from .capacity_tables import find_capacity_model, lookup
 from .const import (
     DOMAIN,
     PARAM_ID_SETPOINT_COMFORT, PARAM_ID_SETPOINT_ECO,
@@ -59,6 +60,11 @@ _SCHEDULE_SCHEMA = vol.Schema({
     vol.Required("day"): vol.In(SANITARY_SCHEDULE_DAY_KEYS),
     vol.Required("slots"): [_SLOT_SCHEMA],
     vol.Optional("eco_setpoint"): vol.Coerce(int),
+})
+
+_PERFORMANCE_SCHEMA = vol.Schema({
+    vol.Required("t_ext"): vol.All(vol.Coerce(float), vol.Range(min=-40, max=50)),
+    vol.Required("t_flow"): vol.All(vol.Coerce(float), vol.Range(min=20, max=70)),
 })
 
 
@@ -158,6 +164,33 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
 
     hass.services.async_register(
         DOMAIN, "set_sanitary_schedule", handle_set_sanitary_schedule, schema=_SCHEDULE_SCHEMA,
+    )
+
+    async def handle_expected_performance(call: ServiceCall) -> ServiceResponse:
+        """Pel/Pt/COP delle Capacity Tables per una coppia (t_ext, t_flow) ipotetica.
+
+        Funzione pura: nessuna dipendenza dallo stato PDC né dal cloud.
+        """
+        api = _loaded_runtime(hass).api
+        model = find_capacity_model(api.thingModel, api.thingDefinitionName)
+        if model is None:
+            raise ServiceValidationError(
+                translation_domain=DOMAIN, translation_key="capacity_model_unsupported",
+            )
+        t_ext, t_flow = call.data["t_ext"], call.data["t_flow"]
+        result = lookup(model.heating, t_ext, t_flow)
+        point = result.point
+        return {
+            "pel_kw": round(point.pel, 2),
+            "pt_kw": round(point.pt, 2),
+            "cop": round(point.cop, 2),
+            "clamped": result.clamped,
+            "model": model.aliases[0],
+        }
+
+    hass.services.async_register(
+        DOMAIN, "expected_performance", handle_expected_performance,
+        schema=_PERFORMANCE_SCHEMA, supports_response=SupportsResponse.ONLY,
     )
     return True
 
